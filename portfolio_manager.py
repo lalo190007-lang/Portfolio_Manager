@@ -5706,7 +5706,7 @@ def tab_analytics() -> None:
         _n = len(corr_cols)
         _z = corr.values.tolist()
         _txt = [[f"{corr.iloc[i,j]:.2f}" for j in range(_n)] for i in range(_n)]
-        _tclr = [["#ffffff" if abs(corr.iloc[i,j]) > 0.45 else "#6b7280"
+        _tclr = [["#ffffff" if abs(corr.iloc[i,j]) > 0.3 else "#9ca3af"
                   for j in range(_n)] for i in range(_n)]
         fig_corr = go.Figure(go.Heatmap(
             z=_z,
@@ -5716,12 +5716,13 @@ def tab_analytics() -> None:
             texttemplate="%{text}",
             textfont=dict(size=11, family="DM Mono"),
             colorscale=[
-                [0.00, "#ef4444"],
-                [0.20, "#7f1d1d"],
-                [0.45, "#0f172a"],
-                [0.55, "#0f172a"],
-                [0.80, "#14532d"],
-                [1.00, "#34d399"],
+                [0.00, "#dc2626"],
+                [0.20, "#b91c1c"],
+                [0.40, "#7f1d1d"],
+                [0.50, "#27272a"],
+                [0.60, "#14532d"],
+                [0.80, "#15803d"],
+                [1.00, "#4ade80"],
             ],
             zmin=-1, zmax=1,
             hovertemplate="<b>%{x} — %{y}</b><br>Correlación: %{z:.3f}<extra></extra>",
