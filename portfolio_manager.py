@@ -2017,30 +2017,125 @@ def tab_dashboard() -> None:
         "</div></div>",
         unsafe_allow_html=True)
 
-    df_tbl = df_live[["Emisora","Títulos","Cto. Prom.","Invertido",
-                       "Precio","Valor","P&L $","P&L %",
-                       "Var. Día %","Peso","Target","Drift"]].copy()
-    st.dataframe(
-        df_tbl,
-        column_config={
-            "Emisora":    st.column_config.TextColumn("Emisora",    width="small"),
-            "Títulos":    st.column_config.NumberColumn("Títulos",   format="%.5f"),
-            "Cto. Prom.": st.column_config.NumberColumn("Cto. Prom", format="$%.2f"),
-            "Invertido":  st.column_config.NumberColumn("Invertido", format="$%.2f"),
-            "Precio":     st.column_config.NumberColumn("Precio",    format="$%.2f"),
-            "Valor":      st.column_config.NumberColumn("Valor",     format="$%.2f"),
-            "P&L $":      st.column_config.NumberColumn("P&L ($)",   format="$%+.2f"),
-            "P&L %":      st.column_config.NumberColumn("P&L (%)",   format="%+.2f%%"),
-            "Var. Día %": st.column_config.NumberColumn("Var. Día",  format="%+.2f%%"),
-            "Peso":       st.column_config.ProgressColumn("Peso",    format="%.1f%%",
-                                                          min_value=0, max_value=1),
-            "Target":     st.column_config.NumberColumn("Target",    format="%.1f%%"),
-            "Drift":      st.column_config.NumberColumn("Drift",     format="%+.1f%%"),
-        },
-        hide_index=True,
-        use_container_width=True,
-        height=60 + len(df_tbl) * 52,
-    )
+    # ── HTML table with inline mini-sparklines ────────────────
+    _rows_pos = ""
+    for _, _rd in df_live.iterrows():
+        _t       = str(_rd["Emisora"])
+        _pd      = pulse.get(_t, {})
+        _spark   = _pd.get("spark_prices", [])
+        _price   = float(_rd["Precio"])
+        _pnl_pct = float(_rd["P&L %"])
+        _day_pct = float(_rd["Var. Día %"])
+        _peso    = float(_rd["Peso"])
+        _valor   = float(_rd["Valor"])
+        _pnl_usd = float(_rd["P&L $"])
+        _shares  = float(_rd["Títulos"])
+        _avg     = float(_rd["Cto. Prom."])
+        _drift   = float(_rd.get("Drift", 0) or 0)
+
+        _pnl_rgb  = "52,211,153" if _pnl_pct >= 0 else "248,113,113"
+        _pnl_clr  = "#34d399"  if _pnl_pct >= 0 else "#f87171"
+        _day_clr  = "#34d399"  if _day_pct >= 0 else "#f87171"
+        _day_arr  = "▲"        if _day_pct >= 0 else "▼"
+        _drclr    = ("#34d399" if _drift > 0.005 else
+                     "#f87171" if _drift < -0.005 else "#6b7280")
+
+        _mini = ""
+        if len(_spark) >= 4:
+            _ws, _hs = 80, 28
+            _lo, _hi = min(_spark), max(_spark)
+            _rng = _hi - _lo if _hi != _lo else 1.0
+            _sc  = "#34d399" if _day_pct >= 0 else "#f87171"
+            _fid = f"spf_{_t.replace('-','').replace('.','')}"
+            _pts = " ".join(
+                f"{i*(_ws/(len(_spark)-1)):.1f},{_hs-(_v-_lo)/_rng*(_hs-3):.1f}"
+                for i, _v in enumerate(_spark))
+            _pf  = f"0,{_hs} " + _pts + f" {_ws},{_hs}"
+            _ly  = f"{_hs-(_spark[-1]-_lo)/_rng*(_hs-3):.1f}"
+            _mini = (
+                f'<svg width="{_ws}" height="{_hs}" viewBox="0 0 {_ws} {_hs}" '
+                f'preserveAspectRatio="none">'
+                f'<defs><linearGradient id="{_fid}" x1="0" y1="0" x2="0" y2="1">'
+                f'<stop offset="0%" stop-color="{_sc}" stop-opacity=".18"/>'
+                f'<stop offset="100%" stop-color="{_sc}" stop-opacity="0"/>'
+                f'</linearGradient></defs>'
+                f'<polygon points="{_pf}" fill="url(#{_fid})"/>'
+                f'<polyline points="{_pts}" fill="none" stroke="{_sc}" '
+                f'stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
+                f'<circle cx="{_ws}" cy="{_ly}" r="2.5" fill="{_sc}"/>'
+                f'</svg>'
+            )
+
+        _pw = min(100, _peso * 100 * 4)
+        _rows_pos += f"""
+<tr onmouseover="this.style.background='rgba(255,255,255,0.025)'"
+    onmouseout="this.style.background='transparent'"
+    style="border-bottom:1px solid rgba(255,255,255,0.04);transition:background .15s;">
+  <td style="padding:12px 20px 12px 20px;white-space:nowrap;">
+    <div style="font-family:DM Mono,monospace;font-weight:800;font-size:0.88rem;
+                color:#4f8ef7;background:rgba(79,142,247,.1);
+                border:1px solid rgba(79,142,247,.2);border-radius:6px;
+                padding:3px 10px;display:inline-block;">{_t}</div>
+    <div style="font-size:0.67rem;color:#4b5563;font-family:DM Mono,monospace;
+                margin-top:3px;">{_shares:.4f} × ${_avg:,.2f}</div>
+  </td>
+  <td style="padding:10px 16px;">
+    {_mini if _mini else '<div style="width:80px;height:28px;background:rgba(255,255,255,0.025);border-radius:4px;"></div>'}
+  </td>
+  <td style="padding:10px 16px;font-family:DM Mono,monospace;font-weight:700;
+             font-size:0.9rem;color:#e5e7eb;white-space:nowrap;">${_price:,.2f}</td>
+  <td style="padding:10px 12px;white-space:nowrap;">
+    <div style="background:rgba({_pnl_rgb},.1);color:{_pnl_clr};
+                border:1px solid rgba({_pnl_rgb},.22);border-radius:20px;
+                padding:3px 10px;font-family:DM Mono,monospace;
+                font-size:0.82rem;font-weight:700;display:inline-block;">
+      {_pnl_pct*100:+.2f}%</div>
+    <div style="font-size:0.68rem;color:#4b5563;font-family:DM Mono,monospace;
+                margin-top:2px;">${_pnl_usd:+,.2f}</div>
+  </td>
+  <td style="padding:10px 12px;font-family:DM Mono,monospace;font-size:0.86rem;
+             font-weight:700;color:{_day_clr};white-space:nowrap;">
+    {_day_arr} {abs(_day_pct*100):.2f}%</td>
+  <td style="padding:10px 16px;font-family:DM Mono,monospace;font-size:0.86rem;
+             color:#e5e7eb;font-weight:600;white-space:nowrap;">${_valor:,.2f}</td>
+  <td style="padding:10px 20px 10px 16px;min-width:130px;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div style="flex:1;background:rgba(255,255,255,0.06);border-radius:4px;
+                  height:4px;overflow:hidden;min-width:60px;">
+        <div style="width:{_pw:.0f}%;height:100%;background:#4f8ef7;border-radius:4px;"></div>
+      </div>
+      <span style="font-family:DM Mono,monospace;font-size:0.76rem;color:#6b7280;
+                   white-space:nowrap;min-width:38px;text-align:right;">
+        {_peso*100:.1f}%</span>
+    </div>
+  </td>
+  <td style="padding:10px 20px 10px 12px;font-family:DM Mono,monospace;
+             font-size:0.82rem;font-weight:600;color:{_drclr};white-space:nowrap;">
+    {f'{_drift*100:+.1f}pp' if abs(_drift) > 0.001 else '—'}</td>
+</tr>"""
+
+    _th = ("padding:10px 16px;text-align:left;font-family:DM Mono,monospace;"
+           "font-size:0.67rem;font-weight:700;color:#4b5563;text-transform:uppercase;"
+           "letter-spacing:.9px;border-bottom:1px solid rgba(255,255,255,0.07);"
+           "background:rgba(255,255,255,0.025);white-space:nowrap;")
+    st.markdown(f"""
+<div style="border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,0.07);
+            margin-bottom:8px;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr>
+      <th style="{_th}padding-left:20px;">Emisora</th>
+      <th style="{_th}">30D</th>
+      <th style="{_th}">Precio</th>
+      <th style="{_th}padding-left:12px;">P&amp;L</th>
+      <th style="{_th}padding-left:12px;">Hoy</th>
+      <th style="{_th}">Valor</th>
+      <th style="{_th}">Peso</th>
+      <th style="{_th}padding-right:20px;">Drift</th>
+    </tr></thead>
+    <tbody>{_rows_pos}</tbody>
+  </table>
+</div>
+""", unsafe_allow_html=True)
 
     # ═══════════════════════════════════════════════════════════
     # SECCIÓN 5: ACTIVIDAD RECIENTE (HTML auto-contenido)
@@ -5608,15 +5703,68 @@ def tab_analytics() -> None:
     corr_cols = [t for t in tickers if t in returns_df.columns]
     if len(corr_cols) >= 2:
         corr = returns_df[corr_cols].corr()
-        fig_corr = px.imshow(
-            corr,
-            text_auto=".2f",
-            color_continuous_scale="RdBu_r",
+        _n = len(corr_cols)
+        _z = corr.values.tolist()
+        _txt = [[f"{corr.iloc[i,j]:.2f}" for j in range(_n)] for i in range(_n)]
+        _tclr = [["#ffffff" if abs(corr.iloc[i,j]) > 0.45 else "#6b7280"
+                  for j in range(_n)] for i in range(_n)]
+        fig_corr = go.Figure(go.Heatmap(
+            z=_z,
+            x=corr_cols,
+            y=corr_cols,
+            text=_txt,
+            texttemplate="%{text}",
+            textfont=dict(size=11, family="DM Mono"),
+            colorscale=[
+                [0.00, "#f87171"],
+                [0.25, "rgba(248,113,113,0.25)"],
+                [0.50, "#1a1a2a"],
+                [0.75, "rgba(79,142,247,0.30)"],
+                [1.00, "#4f8ef7"],
+            ],
             zmin=-1, zmax=1,
-            aspect="equal",
+            hovertemplate="<b>%{x} — %{y}</b><br>Correlación: %{z:.3f}<extra></extra>",
+            showscale=True,
+            colorbar=dict(
+                title=dict(text="Correlación", font=dict(size=10, color="#6b7280"),
+                           side="right"),
+                tickvals=[-1, -0.5, 0, 0.5, 1],
+                ticktext=["-1.0", "-0.5", "0", "+0.5", "+1.0"],
+                tickfont=dict(size=9, color="#6b7280", family="DM Mono"),
+                thickness=12,
+                len=0.9,
+                bgcolor="rgba(0,0,0,0)",
+                borderwidth=0,
+            ),
+        ))
+        fig_corr.update_layout(
+            **PLOTLY_LAYOUT,
+            height=max(340, _n * 56 + 100),
+            xaxis=dict(tickfont=dict(size=11, color="#9ca3af", family="DM Mono"),
+                       side="bottom", showgrid=False),
+            yaxis=dict(tickfont=dict(size=11, color="#9ca3af", family="DM Mono"),
+                       showgrid=False, autorange="reversed"),
         )
-        fig_corr.update_layout(**PLOTLY_LAYOUT, height=max(300, len(corr_cols) * 50 + 80))
         st.plotly_chart(fig_corr, use_container_width=True, config=PLOTLY_CONFIG)
+
+        # Auto-insight: par más/menos correlacionado
+        _pairs = [(corr_cols[i], corr_cols[j], float(corr.iloc[i,j]))
+                  for i in range(_n) for j in range(i+1, _n)]
+        if _pairs:
+            _top  = max(_pairs, key=lambda x: abs(x[2]))
+            _div  = min(_pairs, key=lambda x: x[2])
+            st.markdown(
+                f"<div style='font-size:0.76rem;color:#6b7280;font-family:DM Mono,"
+                f"monospace;margin-top:-10px;margin-bottom:16px;line-height:1.7;'>"
+                f"Par más correlacionado: "
+                f"<span style='color:#4f8ef7;font-weight:700;'>{_top[0]} / {_top[1]}</span>"
+                f" ({_top[2]:+.2f})&nbsp;&nbsp;·&nbsp;&nbsp;"
+                f"Mayor diversificador: "
+                f"<span style='color:#34d399;font-weight:700;'>{_div[0]} / {_div[1]}</span>"
+                f" ({_div[2]:+.2f})"
+                f"</div>",
+                unsafe_allow_html=True
+            )
 
     # ── Retornos normalizados ─────────────────────────────────
     section("RENDIMIENTO COMPARADO (BASE 100)")
