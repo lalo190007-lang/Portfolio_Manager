@@ -1731,11 +1731,28 @@ def tab_dashboard() -> None:
     with col_line:
         if port_c is not None and len(port_c) > 0:
             fig_l = go.Figure()
-            # Area fill con gradiente visual
+
+            # Calcular rango del eje Y ajustado a los datos reales
+            _all_vals = list(port_c.values)
+            if bench_c is not None:
+                _all_vals += list(bench_c.values)
+            _y_min = min(_all_vals)
+            _y_max = max(_all_vals)
+            _y_pad = (_y_max - _y_min) * 0.08 + 1  # 8% de padding + 1 punto
+            _y_lo  = _y_min - _y_pad
+            _y_hi  = _y_max + _y_pad
+
+            # Línea fantasma en la base del fill para que el área quede bien encuadrada
+            fig_l.add_trace(go.Scatter(
+                x=port_c.index, y=[_y_lo] * len(port_c),
+                mode="lines", line=dict(width=0),
+                showlegend=False, hoverinfo="skip",
+            ))
+            # Area portfolio (fill hasta la línea fantasma, no hasta cero)
             fig_l.add_trace(go.Scatter(
                 x=port_c.index, y=port_c.values, name="Portafolio (TWR)",
                 mode="lines", line=dict(color="#0a84ff", width=2.5),
-                fill="tozeroy", fillcolor="rgba(10,132,255,0.09)",
+                fill="tonexty", fillcolor="rgba(10,132,255,0.10)",
                 hovertemplate="<b>Portafolio TWR</b>: %{y:.1f}<extra></extra>",
             ))
             if bench_c is not None:
@@ -1744,7 +1761,7 @@ def tab_dashboard() -> None:
                     mode="lines", line=dict(color="#636366", width=1.5, dash="dot"),
                     hovertemplate=f"<b>{bench}</b>: %{{y:.1f}}<extra></extra>",
                 ))
-            # Anotación del valor final (outperformance o underperformance)
+            # Anotación del valor final
             _final_port = float(port_c.iloc[-1])
             _delta_lbl = f"{_final_port - 100:+.1f}%"
             _anno_clr  = "#30d158" if _final_port >= 100 else "#ff453a"
@@ -1757,22 +1774,23 @@ def tab_dashboard() -> None:
             )
             # Línea base 100
             fig_l.add_hline(y=100, line_width=1, line_dash="dot",
-                            line_color="rgba(255,255,255,0.08)")
+                            line_color="rgba(255,255,255,0.10)")
             fig_l.update_layout(
                 **_pl(),
                 title=dict(text="Rendimiento TWR (base 100) — desde primera compra",
                            font=dict(size=11, color="#636366"), x=0),
                 height=300, margin=dict(t=36, b=32, l=10, r=48),
-                xaxis=dict(showgrid=False, zeroline=False,
-                           tickfont=dict(size=10, color="#48484a")),
-                yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.035)",
-                           zeroline=False,
-                           tickfont=dict(size=10, color="#48484a")),
+                hovermode="x unified",
                 legend=dict(orientation="h", y=1.1, x=0,
                             font=dict(size=11, color="#8e8e93"),
                             bgcolor="rgba(0,0,0,0)"),
-                hovermode="x unified",
             )
+            fig_l.update_xaxes(showgrid=False, zeroline=False,
+                               tickfont=dict(size=10, color="#48484a"))
+            fig_l.update_yaxes(range=[_y_lo, _y_hi],
+                               showgrid=True, gridcolor="rgba(255,255,255,0.05)",
+                               zeroline=False,
+                               tickfont=dict(size=10, color="#48484a"))
             st.plotly_chart(fig_l, use_container_width=True, config=PLOTLY_CONFIG)
         else:
             st.info("Sin datos históricos aún. Agrega transacciones con fecha para ver la curva.")
