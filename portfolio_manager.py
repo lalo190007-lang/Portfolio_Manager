@@ -1609,6 +1609,63 @@ def tab_dashboard() -> None:
     # ═══════════════════════════════════════════════════════════
     # SECCIÓN 1: HERO HEADER (HTML auto-contenido)
     # ═══════════════════════════════════════════════════════════
+    def _build_monthly_hero(data: dict) -> str:
+        if not data:
+            return ""
+        _mn = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+        _years = sorted(data.keys())
+        rows_html = ""
+        for _yr in _years:
+            cells = ""
+            for _mo in range(1, 13):
+                _rv = data[_yr].get(_mo)
+                if _rv is None:
+                    cells += (
+                        f'<td style="padding:5px 0;text-align:center;'
+                        f'font-family:DM Mono,monospace;font-size:0.65rem;'
+                        f'color:#2c2c2e;border-radius:5px;">—</td>'
+                    )
+                else:
+                    # Color: verde → rojo lineal, máximo visual en ±10%
+                    _pct = max(-1, min(1, _rv / 0.10))
+                    if _rv >= 0:
+                        _a   = min(0.85, 0.15 + _pct * 0.70)
+                        _bg  = f"rgba(48,209,88,{_a:.2f})"
+                        _txt = "#000000" if _a > 0.45 else "#30d158"
+                    else:
+                        _a   = min(0.85, 0.15 + abs(_pct) * 0.70)
+                        _bg  = f"rgba(255,69,58,{_a:.2f})"
+                        _txt = "#000000" if _a > 0.45 else "#ff453a"
+                    cells += (
+                        f'<td style="padding:5px 4px;text-align:center;'
+                        f'background:{_bg};border-radius:5px;'
+                        f'font-family:DM Mono,monospace;font-size:0.68rem;'
+                        f'font-weight:600;color:{_txt};white-space:nowrap;">'
+                        f'{_rv:+.1%}</td>'
+                    )
+            rows_html += (
+                f'<tr>'
+                f'<td style="padding:5px 10px 5px 0;font-family:DM Mono,monospace;'
+                f'font-size:0.65rem;color:#636366;white-space:nowrap;">{_yr}</td>'
+                f'{cells}</tr>'
+            )
+        header_cells = "".join(
+            f'<th style="padding:0 4px 6px;text-align:center;font-family:DM Mono,monospace;'
+            f'font-size:0.6rem;font-weight:600;color:#48484a;letter-spacing:0.5px;">{m}</th>'
+            for m in _mn
+        )
+        return (
+            f'<div style="margin-top:18px;padding-top:14px;'
+            f'border-top:1px solid rgba(255,255,255,0.07);">'
+            f'<div style="font-size:0.58rem;font-weight:700;letter-spacing:1.5px;'
+            f'color:#48484a;text-transform:uppercase;font-family:DM Mono,monospace;'
+            f'margin-bottom:8px;">Retornos Mensuales</div>'
+            f'<table style="border-collapse:separate;border-spacing:3px 0;width:100%;">'
+            f'<thead><tr><th style="width:40px"></th>{header_cells}</tr></thead>'
+            f'<tbody>{rows_html}</tbody>'
+            f'</table></div>'
+        )
+
     def _hero_stat(label, value, color, sub=""):
         return (
             f'<div style="text-align:right;">'
@@ -1685,6 +1742,9 @@ def tab_dashboard() -> None:
 
   <!-- Chips de riesgo -->
   <div style="display:flex;gap:8px;flex-wrap:wrap;">{chips}</div>
+
+  <!-- Mini heatmap de retornos mensuales -->
+  {_build_monthly_hero(_monthly_hero)}
 </div>
 """, unsafe_allow_html=True)
 
@@ -1738,6 +1798,15 @@ def tab_dashboard() -> None:
             _bs = _h_dash[bench].reindex(port_c.index).ffill().bfill()
             if not _bs.empty and _bs.iloc[0] > 0:
                 bench_c = _bs / _bs.iloc[0] * 100
+
+    # ── Retornos mensuales para la mini-tabla del hero ────────
+    _monthly_hero: dict[int, dict[int, float]] = {}  # {year: {month: ret}}
+    if port_c is not None and len(port_c) > 5:
+        _dr_hero = port_c.pct_change().dropna()
+        _mr_hero = ((_dr_hero + 1).resample("ME").prod() - 1)
+        for _ts, _rv in _mr_hero.items():
+            _y, _m = _ts.year, _ts.month
+            _monthly_hero.setdefault(_y, {})[_m] = float(_rv)
 
     col_line, col_donut = st.columns([3, 2], gap="small")
 
