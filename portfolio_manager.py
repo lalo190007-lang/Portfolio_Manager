@@ -6002,12 +6002,10 @@ def tab_analytics() -> None:
                 line=dict(color="#a78bfa", width=1.8),
                 hovertemplate="RSI: %{y:.1f}<extra></extra>"),
                 row=2, col=1)
-            _fig_bb.update_layout(
-                **PLOTLY_LAYOUT, height=520,
-                legend=dict(orientation="h", y=1.04, x=0,
-                            font=dict(size=10, color="#6b7280"),
-                            bgcolor="rgba(0,0,0,0)"),
-            )
+            _fig_bb.update_layout(**PLOTLY_LAYOUT, height=520)
+            _fig_bb.update_layout(legend=dict(orientation="h", y=1.04, x=0,
+                                              font=dict(size=10, color="#6b7280"),
+                                              bgcolor="rgba(0,0,0,0)"))
             _fig_bb.update_yaxes(title_text=f"Precio {_sel}", row=1, col=1,
                                   showgrid=True, gridcolor="rgba(255,255,255,0.04)")
             _fig_bb.update_yaxes(title_text="RSI", row=2, col=1,
