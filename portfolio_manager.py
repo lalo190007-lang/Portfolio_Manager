@@ -1763,12 +1763,13 @@ def tab_dashboard() -> None:
                     hovertemplate=f"<b>{bench}</b>: %{{y:.1f}}<extra></extra>",
                 ))
 
-            # Fill sutil debajo del portafolio
-            _fill_clr = "rgba(10,132,255,0.08)" if float(port_c.iloc[-1]) >= 100 else "rgba(255,69,58,0.07)"
+            # Fill que imita el gradiente de Apple Stocks sobre fondo negro
+            _line_clr = "#0a84ff" if float(port_c.iloc[-1]) >= 100 else "#ff453a"
+            _fill_clr = "rgba(10,132,255,0.18)" if _line_clr == "#0a84ff" else "rgba(255,69,58,0.18)"
             fig_l.add_trace(go.Scatter(
                 x=port_c.index, y=port_c.values, name="Portafolio (TWR)",
                 mode="lines",
-                line=dict(color="#0a84ff", width=2.5),
+                line=dict(color=_line_clr, width=2),
                 fill="tozeroy", fillcolor=_fill_clr,
                 hovertemplate="TWR: <b>%{y:.1f}</b><extra></extra>",
             ))
@@ -1777,7 +1778,7 @@ def tab_dashboard() -> None:
             fig_l.add_trace(go.Scatter(
                 x=[port_c.index[-1]], y=[float(port_c.iloc[-1])],
                 mode="markers", showlegend=False,
-                marker=dict(color="#0a84ff", size=8,
+                marker=dict(color=_line_clr, size=7,
                             line=dict(color="#ffffff", width=1.5)),
                 hoverinfo="skip",
             ))
@@ -1799,8 +1800,8 @@ def tab_dashboard() -> None:
 
             fig_l.update_layout(
                 **_pl(),
-                paper_bgcolor="#1c1c1e",
-                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="#000000",
+                plot_bgcolor="#000000",
                 title=dict(text="Rendimiento TWR (base 100)",
                            font=dict(size=11, color="#636366", family="DM Mono"), x=0),
                 height=308, margin=dict(t=40, b=32, l=8, r=52),
@@ -1830,7 +1831,7 @@ def tab_dashboard() -> None:
             labels=df_live["Emisora"], values=df_live["Valor"],
             hole=0.72,
             marker_colors=CHART_COLORS[:len(df_live)],
-            marker=dict(line=dict(color="#1c1c1e", width=2.5)),
+            marker=dict(line=dict(color="#000000", width=2)),
             textinfo="none",
             hovertemplate="<b>%{label}</b>  %{percent}<br>$%{value:,.2f}<extra></extra>",
             direction="clockwise", sort=True,
@@ -1846,8 +1847,8 @@ def tab_dashboard() -> None:
         )
         fig_d.update_layout(
             **_pl(),
-            paper_bgcolor="#1c1c1e",
-            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="#000000",
+            plot_bgcolor="#000000",
             title=dict(text="Composición", font=dict(size=11, color="#636366", family="DM Mono"), x=0),
             height=308, margin=dict(t=40, b=10, l=10, r=16),
             showlegend=True,
@@ -1927,8 +1928,8 @@ def tab_dashboard() -> None:
 
         fig_b.update_layout(
             **_pl(),
-            paper_bgcolor="#1c1c1e",
-            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="#000000",
+            plot_bgcolor="#000000",
             barmode="stack",
             bargap=0.32,
             title=dict(text="P&L por posición",
@@ -1965,8 +1966,8 @@ def tab_dashboard() -> None:
             ))
             fig_dr.update_layout(
                 **_pl(),
-                paper_bgcolor="#1c1c1e",
-                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="#000000",
+                plot_bgcolor="#000000",
                 title=dict(text="Drift vs target",
                            font=dict(size=11, color="#636366", family="DM Mono"), x=0),
                 height=308, margin=dict(t=40, b=20, l=10, r=52),
