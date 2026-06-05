@@ -6269,12 +6269,22 @@ def tab_analytics() -> None:
             _arts = _news_data.get(_nt, [])
             if _arts:
                 for _art in _arts:
-                    _title = _art.get("title", "Sin título")[:80]
-                    _link  = _art.get("link", "#")
-                    _pub   = _art.get("publisher", "")
+                    # yfinance >=0.2.50 anida los datos en "content"
+                    _c = _art.get("content", _art)
+                    _title = (_c.get("title") or _art.get("title") or "Sin título")[:80]
+                    _link  = (_c.get("canonicalUrl", {}).get("url")
+                              or _art.get("link") or "#")
+                    _pub   = (_c.get("provider", {}).get("displayName")
+                              or _art.get("publisher") or "")
                     _ts    = _art.get("providerPublishTime", 0)
+                    _pd_raw = _c.get("pubDate", "")
                     try:
-                        _fecha = datetime.fromtimestamp(_ts).strftime("%d %b") if _ts else ""
+                        if _pd_raw:
+                            _fecha = _pd_raw[:10]
+                        elif _ts:
+                            _fecha = datetime.fromtimestamp(_ts).strftime("%d %b")
+                        else:
+                            _fecha = ""
                     except Exception:
                         _fecha = ""
                     st.markdown(
