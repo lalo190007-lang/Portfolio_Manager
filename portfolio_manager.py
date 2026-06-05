@@ -1703,19 +1703,23 @@ def tab_dashboard() -> None:
 
     port_c, bench_c = None, None
     if not _h_dash.empty:
-        _eq_dash = build_portfolio_equity_from_transactions(_dash_txns, _h_dash)
-        if _eq_dash.empty:
-            # Fallback: pesos actuales si no hay transacciones con fecha
-            _tl = [t for t in tickers if t in _h_dash.columns]
-            _wd = dict(zip(df_live["Emisora"], df_live["Peso"]))
-            _w  = np.array([_wd.get(t, 0) for t in _tl])
-            _w /= max(_w.sum(), 1e-9)
-            _pr = _h_dash[_tl].pct_change().dropna(how="all").fillna(0)
-            _eq_dash = pd.Series((_pr.values @ _w + 1).cumprod() * 100,
-                                 index=_pr.index)
-        # Normalizar a base 100 desde el primer día con valor
-        if not _eq_dash.empty:
-            port_c = _eq_dash / _eq_dash.iloc[0] * 100
+        # TWR — mismo cálculo que tab Performance, sin efecto de aportaciones
+        _twr_dash = build_twr_series(_dash_txns, _h_dash)
+        if not _twr_dash.empty:
+            port_c = _twr_dash
+        else:
+            # Fallback si no hay transacciones con fecha válida
+            _eq_dash = build_portfolio_equity_from_transactions(_dash_txns, _h_dash)
+            if _eq_dash.empty:
+                _tl = [t for t in tickers if t in _h_dash.columns]
+                _wd = dict(zip(df_live["Emisora"], df_live["Peso"]))
+                _w  = np.array([_wd.get(t, 0) for t in _tl])
+                _w /= max(_w.sum(), 1e-9)
+                _pr = _h_dash[_tl].pct_change().dropna(how="all").fillna(0)
+                _eq_dash = pd.Series((_pr.values @ _w + 1).cumprod() * 100,
+                                     index=_pr.index)
+            if not _eq_dash.empty:
+                port_c = _eq_dash / _eq_dash.iloc[0] * 100
 
         if bench in _h_dash.columns and port_c is not None:
             _bs = _h_dash[bench].reindex(port_c.index).ffill().bfill()
@@ -1729,10 +1733,10 @@ def tab_dashboard() -> None:
             fig_l = go.Figure()
             # Area fill con gradiente visual
             fig_l.add_trace(go.Scatter(
-                x=port_c.index, y=port_c.values, name="Portafolio",
+                x=port_c.index, y=port_c.values, name="Portafolio (TWR)",
                 mode="lines", line=dict(color="#0a84ff", width=2.5),
                 fill="tozeroy", fillcolor="rgba(10,132,255,0.09)",
-                hovertemplate="<b>Portafolio</b>: %{y:.1f}<extra></extra>",
+                hovertemplate="<b>Portafolio TWR</b>: %{y:.1f}<extra></extra>",
             ))
             if bench_c is not None:
                 fig_l.add_trace(go.Scatter(
@@ -1756,7 +1760,7 @@ def tab_dashboard() -> None:
                             line_color="rgba(255,255,255,0.08)")
             fig_l.update_layout(
                 **_pl(),
-                title=dict(text="Rendimiento acumulado (base 100) — desde primera compra",
+                title=dict(text="Rendimiento TWR (base 100) — desde primera compra",
                            font=dict(size=11, color="#636366"), x=0),
                 height=300, margin=dict(t=36, b=32, l=10, r=48),
                 xaxis=dict(showgrid=False, zeroline=False,
@@ -5743,9 +5747,19 @@ def tab_performance() -> None:
             bgcolor="rgba(10,10,15,0.85)", bordercolor="#ff453a",
             borderwidth=1, borderpad=4, ax=30, ay=-30,
         )
-    fig_dd.update_layout(
-        **PLOTLY_LAYOUT, height=320, yaxis_title="Caída desde máximo (%)",
-    )
+    # Rango del eje Y: 50% de margen bajo el max DD real (mínimo -15% para que no se vea flat)
+    _dd_floor  = min(max_dd_val * 1.5, -15.0)
+    # Si también el benchmark tiene drawdowns más profundos, incluirlos
+    if not bench_dd_series.empty:
+        _dd_floor = min(_dd_floor, float(bench_dd_series.min()) * 1.3)
+    _dd_floor  = min(_dd_floor, -5.0)   # nunca menos de -5% de margen visual
+
+    fig_dd.update_layout(**PLOTLY_LAYOUT, height=320)
+    fig_dd.update_yaxes(title_text="Caída desde máximo (%)",
+                        range=[_dd_floor, 0.5],
+                        ticksuffix="%",
+                        showgrid=True, gridcolor="rgba(255,255,255,0.05)")
+    fig_dd.update_xaxes(showgrid=False)
     st.plotly_chart(fig_dd, use_container_width=True, config=PLOTLY_CONFIG)
 
     # Stats row
@@ -6002,21 +6016,29 @@ def tab_analytics() -> None:
                 line=dict(color="#0a84ff", width=2),
                 hovertemplate=f"<b>{_sel}</b> $%{{y:,.2f}}<extra></extra>"),
                 row=1, col=1)
-            # RSI
-            _fig_bb.add_hrect(y0=70, y1=100, fillcolor="rgba(255,69,58,0.07)",
-                               line_width=0, row=2, col=1)
-            _fig_bb.add_hrect(y0=0,  y1=30,  fillcolor="rgba(48,209,88,0.07)",
-                               line_width=0, row=2, col=1)
-            _fig_bb.add_hline(y=70, line_color="rgba(255,69,58,0.45)",
-                               line_dash="dot", row=2, col=1,
-                               annotation_text="Sobrecompra",
-                               annotation_font=dict(size=9,color="#ff453a",family="DM Mono"),
-                               annotation_position="right")
-            _fig_bb.add_hline(y=30, line_color="rgba(48,209,88,0.45)",
-                               line_dash="dot", row=2, col=1,
-                               annotation_text="Sobreventa",
-                               annotation_font=dict(size=9,color="#30d158",family="DM Mono"),
-                               annotation_position="right")
+            # RSI — usar add_shape con yref="y2" (más fiable en subplots que add_hline)
+            for _rlvl, _rclr, _rtxt, _ranch in [
+                (70, "#ff453a", "Sobrecompra", "bottom"),
+                (30, "#30d158", "Sobreventa",  "top"),
+            ]:
+                _fig_bb.add_shape(
+                    type="line", x0=0, x1=1, y0=_rlvl, y1=_rlvl,
+                    xref="paper", yref="y2",
+                    line=dict(color=_rclr, width=1.2, dash="dot"),
+                )
+                _fig_bb.add_annotation(
+                    x=0.01, y=_rlvl, xref="paper", yref="y2",
+                    text=_rtxt, showarrow=False,
+                    font=dict(size=9, color=_rclr, family="DM Mono"),
+                    xanchor="left", yanchor=_ranch,
+                )
+            # Zonas de fondo para RSI
+            _fig_bb.add_shape(type="rect", x0=0, x1=1, y0=70, y1=100,
+                xref="paper", yref="y2",
+                fillcolor="rgba(255,69,58,0.07)", line_width=0)
+            _fig_bb.add_shape(type="rect", x0=0, x1=1, y0=0, y1=30,
+                xref="paper", yref="y2",
+                fillcolor="rgba(48,209,88,0.07)", line_width=0)
             _fig_bb.add_trace(go.Scatter(
                 x=_rsi14.index, y=_rsi14.values, name="RSI 14",
                 line=dict(color="#a78bfa", width=1.8),
