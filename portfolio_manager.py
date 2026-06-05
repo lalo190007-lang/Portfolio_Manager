@@ -129,133 +129,169 @@ def fetch_cetes_rate(token: str) -> tuple[float, str]:
 # ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap');
 
+/* ══════════════════════════════════════════════════════════
+   DESIGN TOKENS  —  Apple Dark Mode palette
+   ══════════════════════════════════════════════════════════ */
 :root {
-    --bg:       #0a0a0f;
-    --surface:  #111118;
-    --card:     #16161f;
-    --border:   rgba(255,255,255,0.07);
-    --accent:   #4f8ef7;
-    --green:    #34d399;
-    --red:      #f87171;
-    --amber:    #fbbf24;
-    --muted:    #6b7280;
-    --text:     #e5e7eb;
-    --text-dim: #9ca3af;
-    --mono:     'DM Mono', monospace;
+    --bg:        #000000;
+    --surface:   #0d0d0d;
+    --card:      #1c1c1e;
+    --card-hi:   #2c2c2e;
+    --border:    rgba(255,255,255,0.08);
+    --border-hi: rgba(255,255,255,0.16);
+    --accent:    #0a84ff;
+    --green:     #30d158;
+    --red:       #ff453a;
+    --amber:     #ffd60a;
+    --purple:    #bf5af2;
+    --muted:     #8e8e93;
+    --muted-2:   #48484a;
+    --text:      #ffffff;
+    --text-2:    rgba(255,255,255,0.55);
+    --text-dim:  rgba(255,255,255,0.35);
+    --mono:      'DM Mono', monospace;
+    --radius-sm: 10px;
+    --radius:    16px;
+    --radius-lg: 22px;
+    --shadow:    0 4px 24px rgba(0,0,0,0.5);
+    --shadow-lg: 0 12px 48px rgba(0,0,0,0.6);
 }
 
+/* ── Base ─────────────────────────────────────────────────── */
 html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif;
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     color: var(--text);
+    -webkit-font-smoothing: antialiased;
 }
 .stApp { background: var(--bg); }
 
-/* Sidebar */
+/* ── Sidebar ──────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
     background: var(--surface);
     border-right: 1px solid var(--border);
 }
-
-/* Título hero */
-.hero-title {
-    font-size: 2.2rem;
-    font-weight: 700;
-    letter-spacing: -1px;
-    color: #fff;
-    line-height: 1;
-    margin-bottom: 4px;
-}
-.hero-sub {
-    font-size: 0.85rem;
-    color: var(--muted);
-    font-family: var(--mono);
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+    font-size: 0.82rem;
+    line-height: 1.65;
+    color: var(--text-2);
 }
 
-/* Tabs */
+/* ── Tabs — iOS Segment Control ───────────────────────────── */
 .stTabs [data-baseweb="tab-list"] {
-    background: var(--surface);
+    background: rgba(255,255,255,0.05);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 5px;
-    gap: 4px;
-    margin-bottom: 24px;
+    border-radius: var(--radius);
+    padding: 4px;
+    gap: 2px;
+    margin-bottom: 28px;
 }
 .stTabs [data-baseweb="tab"] {
-    border-radius: 8px;
-    padding: 7px 18px;
+    border-radius: var(--radius-sm);
+    padding: 8px 18px;
     background: transparent;
     border: none;
     color: var(--muted);
     font-weight: 500;
-    font-size: 0.88rem;
+    font-size: 0.85rem;
+    letter-spacing: -0.1px;
+    transition: color 0.18s ease, background 0.18s ease;
 }
 .stTabs [aria-selected="true"] {
-    background: var(--accent) !important;
-    color: #fff !important;
-    box-shadow: 0 2px 12px rgba(79,142,247,0.35);
+    background: rgba(255,255,255,0.11) !important;
+    color: var(--text) !important;
+    font-weight: 600 !important;
+}
+.stTabs [data-baseweb="tab"]:hover:not([aria-selected="true"]) {
+    color: rgba(255,255,255,0.7) !important;
+    background: rgba(255,255,255,0.04) !important;
 }
 
-/* Cards */
+/* ── Cards ────────────────────────────────────────────────── */
 .pm-card {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 20px 22px;
-    margin-bottom: 16px;
-    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    border-radius: var(--radius-lg);
+    padding: 22px 24px;
+    margin-bottom: 12px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 .pm-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 10px 36px rgba(0,0,0,0.3);
-    border-color: rgba(255,255,255,0.13);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--border-hi);
 }
 .pm-card-label {
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 0.7px;
     color: var(--muted);
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     font-family: var(--mono);
 }
 .pm-card-value {
-    font-size: 1.9rem;
+    font-size: 2rem;
     font-weight: 700;
-    color: #fff;
-    letter-spacing: -1px;
+    color: var(--text);
+    letter-spacing: -1.5px;
     font-family: var(--mono);
     line-height: 1;
 }
 .pm-card-sub {
-    font-size: 0.8rem;
+    font-size: 0.76rem;
     color: var(--muted);
-    margin-top: 5px;
+    margin-top: 6px;
 }
 
-/* Badges */
-.badge-pos { color: var(--green); background: rgba(52,211,153,0.1); 
-             border: 1px solid rgba(52,211,153,0.25); border-radius: 20px;
-             padding: 2px 10px; font-size: 0.82rem; font-weight: 600; font-family: var(--mono); }
-.badge-neg { color: var(--red); background: rgba(248,113,113,0.1);
-             border: 1px solid rgba(248,113,113,0.25); border-radius: 20px;
-             padding: 2px 10px; font-size: 0.82rem; font-weight: 600; font-family: var(--mono); }
-.badge-neu { color: var(--amber); background: rgba(251,191,36,0.1);
-             border: 1px solid rgba(251,191,36,0.25); border-radius: 20px;
-             padding: 2px 10px; font-size: 0.82rem; font-weight: 600; font-family: var(--mono); }
+/* ── KPI card gradient variants ──────────────────────────── */
+.pm-card-green {
+    background: linear-gradient(145deg, rgba(48,209,88,.09) 0%, var(--card) 60%) !important;
+    border-color: rgba(48,209,88,.2) !important;
+}
+.pm-card-red {
+    background: linear-gradient(145deg, rgba(255,69,58,.09) 0%, var(--card) 60%) !important;
+    border-color: rgba(255,69,58,.2) !important;
+}
+.pm-card-blue {
+    background: linear-gradient(145deg, rgba(10,132,255,.09) 0%, var(--card) 60%) !important;
+    border-color: rgba(10,132,255,.2) !important;
+}
+.pm-card-amber {
+    background: linear-gradient(145deg, rgba(255,214,10,.07) 0%, var(--card) 60%) !important;
+    border-color: rgba(255,214,10,.18) !important;
+}
 
-/* Sección header */
+/* ── Badges ───────────────────────────────────────────────── */
+.badge-pos {
+    color: var(--green); background: rgba(48,209,88,0.12);
+    border: 1px solid rgba(48,209,88,0.22); border-radius: 20px;
+    padding: 2px 10px; font-size: 0.8rem; font-weight: 600;
+    font-family: var(--mono);
+}
+.badge-neg {
+    color: var(--red); background: rgba(255,69,58,0.12);
+    border: 1px solid rgba(255,69,58,0.22); border-radius: 20px;
+    padding: 2px 10px; font-size: 0.8rem; font-weight: 600;
+    font-family: var(--mono);
+}
+.badge-neu {
+    color: var(--amber); background: rgba(255,214,10,0.1);
+    border: 1px solid rgba(255,214,10,0.2); border-radius: 20px;
+    padding: 2px 10px; font-size: 0.8rem; font-weight: 600;
+    font-family: var(--mono);
+}
+
+/* ── Section label ────────────────────────────────────────── */
 .section-label {
-    font-size: 0.72rem;
+    font-size: 0.65rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 1.2px;
-    color: var(--accent);
+    letter-spacing: 1.1px;
+    color: var(--muted);
     font-family: var(--mono);
-    margin-bottom: 14px;
+    margin: 32px 0 14px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--border);
     position: relative;
@@ -265,136 +301,150 @@ html, body, [class*="css"] {
     position: absolute;
     bottom: -1px;
     left: 0;
-    width: 36px;
-    height: 2px;
-    background: linear-gradient(90deg, var(--accent), rgba(79,142,247,0));
+    width: 24px;
+    height: 1.5px;
+    background: var(--accent);
     border-radius: 2px;
 }
 
-/* Trade rows */
-.trade-buy  { color: var(--green); font-weight: 600; font-family: var(--mono); }
-.trade-sell { color: var(--red);   font-weight: 600; font-family: var(--mono); }
-.trade-hold { color: var(--muted); font-family: var(--mono); }
+/* ── Trade rows ───────────────────────────────────────────── */
+.trade-buy  { color: var(--green);  font-weight: 600; font-family: var(--mono); }
+.trade-sell { color: var(--red);    font-weight: 600; font-family: var(--mono); }
+.trade-hold { color: var(--muted);  font-family: var(--mono); }
 
-/* Botones */
+/* ── Buttons ──────────────────────────────────────────────── */
 .stButton > button {
-    border-radius: 10px !important;
+    border-radius: var(--radius-sm) !important;
     font-weight: 600 !important;
     font-family: 'DM Sans', sans-serif !important;
+    font-size: 0.86rem !important;
+    letter-spacing: -0.1px !important;
     border: none !important;
-    transition: all 0.15s ease !important;
+    transition: all 0.18s ease !important;
 }
 .stButton > button[kind="primary"] {
     background: var(--accent) !important;
-    box-shadow: 0 4px 14px rgba(79,142,247,0.3) !important;
+    box-shadow: 0 4px 16px rgba(10,132,255,0.28) !important;
 }
 .stButton > button[kind="primary"]:hover {
     transform: translateY(-1px) !important;
-    box-shadow: 0 6px 20px rgba(79,142,247,0.4) !important;
+    box-shadow: 0 6px 22px rgba(10,132,255,0.38) !important;
 }
-
-/* Inputs */
-div[data-baseweb="input"] > div,
-div[data-baseweb="base-input"],
-div[data-baseweb="select"] > div {
-    background: var(--surface) !important;
+.stButton > button:not([kind="primary"]) {
+    background: var(--card) !important;
     border: 1px solid var(--border) !important;
-    border-radius: 10px !important;
+    color: var(--text-2) !important;
+}
+.stButton > button:not([kind="primary"]):hover {
+    background: var(--card-hi) !important;
+    border-color: var(--border-hi) !important;
     color: var(--text) !important;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: rgba(0,0,0,0.15); }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 5px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
-
-/* Plotly dark override */
-.js-plotly-plot .plotly .bg { fill: transparent !important; }
-
-/* Info/warning/success */
-.stAlert { border-radius: 12px !important; }
-
-/* Metrics nativas de Streamlit */
-[data-testid="stMetricValue"] {
-    font-family: var(--mono) !important;
-    font-size: 1.4rem !important;
+/* ── Inputs ───────────────────────────────────────────────── */
+div[data-baseweb="input"] > div,
+div[data-baseweb="base-input"],
+div[data-baseweb="select"] > div {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    color: var(--text) !important;
 }
-
-/* ── Live pulse dot ─────────────────────────────────────── */
-@keyframes _lp { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.3;transform:scale(.75)} }
-.live-dot {
-    width:7px; height:7px; border-radius:50%; background:#34d399;
-    display:inline-block; vertical-align:middle; margin-right:6px;
-    animation:_lp 2.4s ease-in-out infinite;
-    box-shadow:0 0 8px rgba(52,211,153,.55);
-}
-
-/* ── Glow text utilities ─────────────────────────────────── */
-.glow-green { text-shadow:0 0 20px rgba(52,211,153,.45); }
-.glow-red   { text-shadow:0 0 20px rgba(248,113,113,.45); }
-.glow-blue  { text-shadow:0 0 20px rgba(79,142,247,.45); }
-
-/* ── Market Pulse card hover ─────────────────────────────── */
-@keyframes _fi2{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.mp-card {
-    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
-    animation: _fi2 .3s ease-out both;
-}
-.mp-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 18px 50px rgba(0,0,0,.38);
-}
-
-/* ── Input focus glow ────────────────────────────────────── */
 div[data-baseweb="input"] > div:focus-within {
-    border-color: rgba(79,142,247,.5) !important;
-    box-shadow: 0 0 0 3px rgba(79,142,247,.12) !important;
+    border-color: rgba(10,132,255,0.55) !important;
+    box-shadow: 0 0 0 3px rgba(10,132,255,0.12) !important;
 }
 div[data-baseweb="select"] > div:focus-within {
-    border-color: rgba(79,142,247,.5) !important;
+    border-color: rgba(10,132,255,0.55) !important;
 }
 
-/* ── Ticker badge chip ───────────────────────────────────── */
+/* ── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+
+/* ── Plotly ───────────────────────────────────────────────── */
+.js-plotly-plot .plotly .bg { fill: transparent !important; }
+
+/* ── Alerts ───────────────────────────────────────────────── */
+.stAlert { border-radius: var(--radius) !important; }
+
+/* ── Streamlit metrics ────────────────────────────────────── */
+[data-testid="stMetricValue"] {
+    font-family: var(--mono) !important;
+    font-size: 1.5rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -1px !important;
+}
+[data-testid="stMetricLabel"] {
+    font-size: 0.7rem !important;
+    color: var(--muted) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.6px !important;
+}
+
+/* ── Live pulse dot ───────────────────────────────────────── */
+@keyframes _lp { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.65)} }
+.live-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--green);
+    display: inline-block; vertical-align: middle; margin-right: 7px;
+    animation: _lp 2.4s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(48,209,88,.55);
+}
+
+/* ── Glow utilities ───────────────────────────────────────── */
+.glow-green { text-shadow: 0 0 22px rgba(48,209,88,.42); }
+.glow-red   { text-shadow: 0 0 22px rgba(255,69,58,.42); }
+.glow-blue  { text-shadow: 0 0 22px rgba(10,132,255,.42); }
+
+/* ── Market Pulse card ────────────────────────────────────── */
+@keyframes _fi2 { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:none} }
+.mp-card {
+    transition: transform .2s ease, box-shadow .2s ease;
+    animation: _fi2 .28s ease-out both;
+}
+.mp-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 20px 52px rgba(0,0,0,.45);
+}
+
+/* ── Ticker chip ──────────────────────────────────────────── */
 .ticker-chip {
-    display:inline-flex; align-items:center;
-    background:rgba(79,142,247,.1); border:1px solid rgba(79,142,247,.22);
-    border-radius:6px; padding:2px 8px;
-    font-family:var(--mono); font-size:.72rem; font-weight:700;
-    color:var(--accent); letter-spacing:.5px;
+    display: inline-flex; align-items: center;
+    background: rgba(10,132,255,.12);
+    border: 1px solid rgba(10,132,255,.22);
+    border-radius: 7px; padding: 2px 8px;
+    font-family: var(--mono); font-size: .7rem; font-weight: 700;
+    color: var(--accent); letter-spacing: .4px;
 }
 
-/* ── KPI card gradient variants ──────────────────────────── */
-.pm-card-green {
-    background:linear-gradient(135deg,rgba(52,211,153,.07) 0%,var(--card) 100%) !important;
-    border-color:rgba(52,211,153,.22) !important;
+/* ── Hero typography ──────────────────────────────────────── */
+.hero-title {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -1px;
+    color: var(--text);
+    line-height: 1;
+    margin-bottom: 4px;
 }
-.pm-card-red {
-    background:linear-gradient(135deg,rgba(248,113,113,.07) 0%,var(--card) 100%) !important;
-    border-color:rgba(248,113,113,.22) !important;
-}
-.pm-card-blue {
-    background:linear-gradient(135deg,rgba(79,142,247,.07) 0%,var(--card) 100%) !important;
-    border-color:rgba(79,142,247,.22) !important;
-}
-.pm-card-amber {
-    background:linear-gradient(135deg,rgba(251,191,36,.07) 0%,var(--card) 100%) !important;
-    border-color:rgba(251,191,36,.22) !important;
-}
-
-/* ── Sidebar enhancements ────────────────────────────────── */
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
-    font-size: 0.82rem;
-    line-height: 1.7;
+.hero-sub {
+    font-size: 0.75rem;
+    color: var(--muted);
+    font-family: var(--mono);
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
 }
 
-/* ── Divider refinement ──────────────────────────────────── */
-hr { border-color: rgba(255,255,255,0.06) !important; }
+/* ── Divider ──────────────────────────────────────────────── */
+hr { border-color: var(--border) !important; }
 
-/* ── Tab hover state ─────────────────────────────────────── */
-.stTabs [data-baseweb="tab"]:hover {
-    background: rgba(255,255,255,0.04) !important;
-    color: var(--text-dim) !important;
+/* ── Dataframe ────────────────────────────────────────────── */
+[data-testid="stDataFrame"] {
+    border-radius: var(--radius) !important;
+    overflow: hidden !important;
+    border: 1px solid var(--border) !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -1359,22 +1409,23 @@ PLOTLY_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
     font_family="DM Mono, monospace",
-    font_color="#9ca3af",
+    font_color="#8e8e93",
     margin=dict(t=40, b=40, l=50, r=20),
     legend=dict(
-        bgcolor="rgba(17,17,24,0.8)",
-        bordercolor="rgba(255,255,255,0.07)",
+        bgcolor="rgba(28,28,30,0.85)",
+        bordercolor="rgba(255,255,255,0.08)",
         borderwidth=1,
+        font=dict(color="#aeaeb2", size=11),
     ),
-    xaxis=dict(gridcolor="rgba(255,255,255,0.04)", showgrid=True),
-    yaxis=dict(gridcolor="rgba(255,255,255,0.04)", showgrid=True),
+    xaxis=dict(gridcolor="rgba(255,255,255,0.05)", showgrid=True, zerolinecolor="rgba(255,255,255,0.08)"),
+    yaxis=dict(gridcolor="rgba(255,255,255,0.05)", showgrid=True, zerolinecolor="rgba(255,255,255,0.08)"),
     hovermode="x unified",
     hoverlabel=dict(
-        bgcolor="rgba(10,10,15,0.95)",
-        font_color="#e5e7eb",
+        bgcolor="rgba(28,28,30,0.97)",
+        font_color="#ffffff",
         font_family="DM Mono, monospace",
         font_size=12,
-        bordercolor="rgba(255,255,255,0.1)",
+        bordercolor="rgba(255,255,255,0.12)",
     ),
 )
 
@@ -1388,10 +1439,10 @@ PLOTLY_CONFIG = {
 def kpi_card(label: str, value: str, sub: str = "", accent: str = "") -> None:
     accent_style = f"color: {accent};" if accent else ""
     _cls = ""
-    if accent == "#34d399":   _cls = "pm-card-green"
-    elif accent == "#f87171": _cls = "pm-card-red"
-    elif accent == "#4f8ef7": _cls = "pm-card-blue"
-    elif accent == "#fbbf24": _cls = "pm-card-amber"
+    if accent == "#30d158":   _cls = "pm-card-green"
+    elif accent == "#ff453a": _cls = "pm-card-red"
+    elif accent == "#0a84ff": _cls = "pm-card-blue"
+    elif accent == "#ffd60a": _cls = "pm-card-amber"
     st.markdown(f"""
     <div class="pm-card {_cls}">
         <div class="pm-card-label">{label}</div>
@@ -1539,120 +1590,88 @@ def tab_dashboard() -> None:
     risk = _risk(tuple(df_live["Emisora"]), tuple(df_live["Peso"]), bench)
 
     # ── Colores ───────────────────────────────────────────────
-    gc = lambda v, rev=False: ("#34d399" if (v>=0)^rev else "#f87171")
+    gc = lambda v, rev=False: ("#30d158" if (v>=0)^rev else "#ff453a")
     ic = lambda v: "▲" if v >= 0 else "▼"
 
     # ═══════════════════════════════════════════════════════════
     # SECCIÓN 1: HERO HEADER (HTML auto-contenido)
     # ═══════════════════════════════════════════════════════════
-    def _hero_pill(label, value, color):
-        # Pill con sutil hover-like glow tintado según color
-        _glow = f"box-shadow:0 0 0 1px {color}22,0 2px 8px rgba(0,0,0,.25);"
-        return (f'<div style="background:rgba(255,255,255,0.035);border:1px solid '
-                f'{color}20;border-radius:30px;padding:5px 14px;'
-                f'white-space:nowrap;{_glow}">'
-                f'<span style="font-size:0.6rem;color:#4b5563;text-transform:uppercase;'
-                f'letter-spacing:1px;font-family:DM Mono,monospace;">{label}&nbsp;</span>'
-                f'<span style="font-size:0.84rem;font-weight:700;color:{color};'
-                f'font-family:DM Mono,monospace;">{value}</span></div>')
+    def _hero_stat(label, value, color, sub=""):
+        return (
+            f'<div style="text-align:right;">'
+            f'<div style="font-size:0.6rem;color:#636366;text-transform:uppercase;'
+            f'letter-spacing:1.5px;font-family:DM Mono,monospace;margin-bottom:4px;">{label}</div>'
+            f'<div style="font-size:1.9rem;font-weight:700;color:{color};'
+            f'font-family:DM Mono,monospace;line-height:1;letter-spacing:-0.5px;">{value}</div>'
+            + (f'<div style="font-size:0.8rem;color:{color};opacity:0.7;'
+               f'font-family:DM Mono,monospace;margin-top:2px;">{sub}</div>' if sub else "")
+            + '</div>'
+        )
 
-    sh_c  = "#34d399" if risk.get("sh",0)>1   else ("#fbbf24" if risk.get("sh",0)>0 else "#f87171")
-    pills = "".join([
-        _hero_pill("Invertido",   f"${cost_total:,.0f}",              "#9ca3af"),
-        _hero_pill("Sharpe 1A",   f"{risk.get('sh',0):.2f}",         sh_c),
-        _hero_pill("Vol. 1A",     f"{risk.get('av',0):.1%}",         "#fbbf24"),
-        _hero_pill("Max DD 1A",   f"{risk.get('mdd',0):.1%}",        "#f87171"),
-        _hero_pill("VaR 95%",     f"{risk.get('v95',0):.2%}",        "#f87171"),
-        _hero_pill("CVaR 95%",    f"{risk.get('cv95',0):.2%}",       "#f87171"),
-        _hero_pill("Beta",        str(risk.get("beta","—")),          "#a78bfa"),
-        _hero_pill("Posiciones",  str(len(df_live)),                  "#4f8ef7"),
+    def _hero_chip(label, value, color):
+        return (
+            f'<div style="display:flex;flex-direction:column;align-items:center;'
+            f'background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);'
+            f'border-radius:12px;padding:8px 14px;min-width:80px;">'
+            f'<span style="font-size:0.58rem;color:#636366;text-transform:uppercase;'
+            f'letter-spacing:1px;font-family:DM Mono,monospace;margin-bottom:3px;">{label}</span>'
+            f'<span style="font-size:0.9rem;font-weight:600;color:{color};'
+            f'font-family:DM Mono,monospace;">{value}</span></div>'
+        )
+
+    sh_c  = "#30d158" if risk.get("sh",0)>1 else ("#ffd60a" if risk.get("sh",0)>0 else "#ff453a")
+    chips = "".join([
+        _hero_chip("Sharpe 1A",  f"{risk.get('sh',0):.2f}",  sh_c),
+        _hero_chip("Vol. 1A",    f"{risk.get('av',0):.1%}",  "#ffd60a"),
+        _hero_chip("Max DD 1A",  f"{risk.get('mdd',0):.1%}", "#ff453a"),
+        _hero_chip("VaR 95%",    f"{risk.get('v95',0):.2%}", "#ff453a"),
+        _hero_chip("Beta",       str(risk.get("beta","—")),   "#bf5af2"),
+        _hero_chip("Posiciones", str(len(df_live)),            "#0a84ff"),
     ])
 
-    # colores con glow para el hero
     _dc = gc(daily_usd); _tc = gc(total_pnl); _ac = gc(alpha_today)
-    _d_glow = "0 0 18px rgba(52,211,153,.25)" if daily_usd>=0 else "0 0 18px rgba(248,113,113,.25)"
-    _t_glow = "0 0 18px rgba(52,211,153,.25)" if total_pnl>=0 else "0 0 18px rgba(248,113,113,.25)"
-    _a_glow = "0 0 18px rgba(52,211,153,.25)" if alpha_today>=0 else "0 0 18px rgba(248,113,113,.25)"
 
     st.markdown(f"""
 <style>
-@keyframes _fi{{from{{opacity:0;transform:translateY(10px)}}to{{opacity:1;transform:translateY(0)}}}}
-@keyframes _grid-drift{{0%{{background-position:0 0}}100%{{background-position:36px 36px}}}}
-.pm-hero{{animation:_fi .5s ease-out both}}
+@keyframes _fi{{from{{opacity:0;transform:translateY(8px)}}to{{opacity:1;transform:translateY(0)}}}}
+.pm-hero{{animation:_fi .4s ease-out both}}
 </style>
 <div class="pm-hero" style="
-  background:linear-gradient(135deg,rgba(8,12,24,0.98) 0%,rgba(12,18,36,0.98) 100%);
-  border:1px solid rgba(255,255,255,0.08);border-radius:24px;
-  padding:30px 34px 24px;margin-bottom:10px;position:relative;overflow:hidden;
-  box-shadow:0 20px 60px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,0.05);">
-  <!-- Grid pattern -->
-  <div style="position:absolute;inset:0;pointer-events:none;border-radius:24px;
-    background-image:linear-gradient(rgba(255,255,255,0.014) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(255,255,255,0.014) 1px,transparent 1px);
-    background-size:36px 36px;opacity:.7;"></div>
-  <!-- Subtle accent glow top-left -->
-  <div style="position:absolute;top:-60px;left:-60px;width:200px;height:200px;
-    border-radius:50%;background:radial-gradient(circle,rgba(79,142,247,.06) 0%,transparent 70%);
-    pointer-events:none;"></div>
+  background:#111113;
+  border:1px solid rgba(255,255,255,0.08);border-radius:22px;
+  padding:28px 32px 22px;margin-bottom:12px;position:relative;overflow:hidden;
+  box-shadow:0 1px 0 rgba(255,255,255,0.04) inset,0 16px 48px rgba(0,0,0,.5);">
 
-  <div style="position:relative;display:flex;justify-content:space-between;
-              align-items:flex-start;flex-wrap:wrap;gap:20px;margin-bottom:24px;">
-    <!-- NAV principal -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;
+              flex-wrap:wrap;gap:20px;margin-bottom:22px;">
+    <!-- NAV principal — estilo Apple Stocks -->
     <div>
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;">
         <span class="live-dot"></span>
-        <span style="font-size:0.6rem;font-weight:700;letter-spacing:2px;color:#4b5563;
-                     text-transform:uppercase;font-family:DM Mono,monospace;">
-          VALOR DE PORTAFOLIO
-        </span>
+        <span style="font-size:0.62rem;font-weight:600;letter-spacing:1.8px;color:#636366;
+                     text-transform:uppercase;font-family:DM Mono,monospace;">VALOR DE PORTAFOLIO</span>
       </div>
-      <div style="font-size:3.2rem;font-weight:800;color:#fff;line-height:1;
-                  font-family:DM Mono,monospace;letter-spacing:-2.5px;
-                  text-shadow:0 2px 20px rgba(255,255,255,0.08);">${nav:,.2f}</div>
-      <div style="font-size:0.82rem;color:#374151;margin-top:6px;font-family:DM Mono,monospace;">
-        ≈ <span style="color:#6b7280;font-weight:600;">${nav*fx:,.0f} MXN</span>
-        &nbsp;·&nbsp;
-        <span style="color:#4b5563;">Invertido ${cost_total:,.0f}</span>
+      <div style="font-size:3.4rem;font-weight:700;color:#ffffff;line-height:1;
+                  letter-spacing:-2px;font-family:DM Sans,sans-serif;">${nav:,.2f}</div>
+      <div style="font-size:0.8rem;color:#48484a;margin-top:8px;font-family:DM Mono,monospace;">
+        <span style="color:#636366;">≈ ${nav*fx:,.0f} MXN</span>
+        &ensp;·&ensp;
+        <span>Invertido ${cost_total:,.0f}</span>
       </div>
     </div>
-    <!-- Métricas del día -->
-    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start;">
-      <div style="text-align:right;">
-        <div style="font-size:0.58rem;color:#374151;text-transform:uppercase;letter-spacing:1.5px;
-                    font-family:DM Mono,monospace;margin-bottom:5px;">HOY</div>
-        <div style="font-size:1.8rem;font-weight:700;color:{_dc};
-                    font-family:DM Mono,monospace;line-height:1;
-                    text-shadow:{_d_glow};">
-          {ic(daily_usd)} ${abs(daily_usd):,.2f}</div>
-        <div style="font-size:0.88rem;color:{_dc};opacity:0.85;
-                    font-family:DM Mono,monospace;margin-top:2px;">{daily_pct:+.2%}</div>
-      </div>
-      <div style="text-align:right;">
-        <div style="font-size:0.58rem;color:#374151;text-transform:uppercase;letter-spacing:1.5px;
-                    font-family:DM Mono,monospace;margin-bottom:5px;">P&amp;L TOTAL</div>
-        <div style="font-size:1.8rem;font-weight:700;color:{_tc};
-                    font-family:DM Mono,monospace;line-height:1;
-                    text-shadow:{_t_glow};">
-          {ic(total_pnl)} ${abs(total_pnl):,.2f}</div>
-        <div style="font-size:0.88rem;color:{_tc};opacity:0.85;
-                    font-family:DM Mono,monospace;margin-top:2px;">{total_ret:+.2%}</div>
-      </div>
-      <div style="text-align:right;">
-        <div style="font-size:0.58rem;color:#374151;text-transform:uppercase;letter-spacing:1.5px;
-                    font-family:DM Mono,monospace;margin-bottom:5px;">α vs {bench}</div>
-        <div style="font-size:1.8rem;font-weight:700;color:{_ac};
-                    font-family:DM Mono,monospace;line-height:1;
-                    text-shadow:{_a_glow};">{alpha_today:+.2%}</div>
-        <div style="font-size:0.82rem;color:#6b7280;font-family:DM Mono,monospace;margin-top:2px;">
-          {bench}: {bench_today:+.2%}</div>
-      </div>
+    <!-- Tres métricas clave -->
+    <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;padding-top:4px;">
+      {_hero_stat("Hoy", f"{ic(daily_usd)} ${abs(daily_usd):,.2f}", _dc, f"{daily_pct:+.2%}")}
+      {_hero_stat("P&amp;L Total", f"{ic(total_pnl)} ${abs(total_pnl):,.2f}", _tc, f"{total_ret:+.2%}")}
+      {_hero_stat(f"α vs {bench}", f"{alpha_today:+.2%}", _ac, f"{bench}: {bench_today:+.2%}")}
     </div>
   </div>
-  <!-- Separador con gradiente -->
-  <div style="height:1px;background:linear-gradient(90deg,rgba(79,142,247,.15),
-              rgba(255,255,255,0.06),rgba(79,142,247,.08));margin-bottom:18px;"></div>
-  <!-- Pills de riesgo -->
-  <div style="position:relative;display:flex;gap:8px;flex-wrap:wrap;">{pills}</div>
+
+  <!-- Divisor -->
+  <div style="height:1px;background:rgba(255,255,255,0.07);margin-bottom:16px;"></div>
+
+  <!-- Chips de riesgo -->
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">{chips}</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1711,20 +1730,20 @@ def tab_dashboard() -> None:
             # Area fill con gradiente visual
             fig_l.add_trace(go.Scatter(
                 x=port_c.index, y=port_c.values, name="Portafolio",
-                mode="lines", line=dict(color="#4f8ef7", width=2.5),
-                fill="tozeroy", fillcolor="rgba(79,142,247,0.09)",
+                mode="lines", line=dict(color="#0a84ff", width=2.5),
+                fill="tozeroy", fillcolor="rgba(10,132,255,0.09)",
                 hovertemplate="<b>Portafolio</b>: %{y:.1f}<extra></extra>",
             ))
             if bench_c is not None:
                 fig_l.add_trace(go.Scatter(
                     x=bench_c.index, y=bench_c.values, name=bench,
-                    mode="lines", line=dict(color="#4b5563", width=1.5, dash="dot"),
+                    mode="lines", line=dict(color="#636366", width=1.5, dash="dot"),
                     hovertemplate=f"<b>{bench}</b>: %{{y:.1f}}<extra></extra>",
                 ))
             # Anotación del valor final (outperformance o underperformance)
             _final_port = float(port_c.iloc[-1])
             _delta_lbl = f"{_final_port - 100:+.1f}%"
-            _anno_clr  = "#34d399" if _final_port >= 100 else "#f87171"
+            _anno_clr  = "#30d158" if _final_port >= 100 else "#ff453a"
             fig_l.add_annotation(
                 x=port_c.index[-1], y=_final_port,
                 text=f"<b>{_delta_lbl}</b>",
@@ -1738,15 +1757,15 @@ def tab_dashboard() -> None:
             fig_l.update_layout(
                 **_pl(),
                 title=dict(text="Rendimiento acumulado (base 100) — desde primera compra",
-                           font=dict(size=11, color="#4b5563"), x=0),
+                           font=dict(size=11, color="#636366"), x=0),
                 height=300, margin=dict(t=36, b=32, l=10, r=48),
                 xaxis=dict(showgrid=False, zeroline=False,
-                           tickfont=dict(size=10, color="#374151")),
+                           tickfont=dict(size=10, color="#48484a")),
                 yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.035)",
                            zeroline=False,
-                           tickfont=dict(size=10, color="#374151")),
+                           tickfont=dict(size=10, color="#48484a")),
                 legend=dict(orientation="h", y=1.1, x=0,
-                            font=dict(size=11, color="#6b7280"),
+                            font=dict(size=11, color="#8e8e93"),
                             bgcolor="rgba(0,0,0,0)"),
                 hovermode="x unified",
             )
@@ -1754,9 +1773,9 @@ def tab_dashboard() -> None:
         else:
             st.info("Sin datos históricos aún. Agrega transacciones con fecha para ver la curva.")
 
-    CHART_COLORS = ["#4f8ef7","#34d399","#fbbf24","#a78bfa",
+    CHART_COLORS = ["#0a84ff","#30d158","#ffd60a","#a78bfa",
                     "#fb923c","#f472b6","#38bdf8","#4ade80",
-                    "#facc15","#c084fc","#f87171","#67e8f9"]
+                    "#facc15","#c084fc","#ff453a","#67e8f9"]
 
     with col_donut:
         fig_d = go.Figure(go.Pie(
@@ -1773,17 +1792,17 @@ def tab_dashboard() -> None:
         fig_d.add_annotation(
             text=f"<b>${nav:,.0f}</b><br><span style='font-size:10px'>{len(df_live)} activos</span>",
             x=0.5, y=0.5, align="center",
-            font=dict(size=13, color="#e5e7eb", family="DM Mono"),
+            font=dict(size=13, color="#ffffff", family="DM Mono"),
             showarrow=False,
         )
         fig_d.update_layout(
             **_pl(),
             title=dict(text="Composición del portafolio",
-                       font=dict(size=11, color="#4b5563"), x=0),
+                       font=dict(size=11, color="#636366"), x=0),
             height=300, margin=dict(t=36, b=10, l=10, r=10),
             showlegend=True,
             legend=dict(orientation="v", x=1.01, y=0.5, xanchor="left",
-                        font=dict(size=11, color="#6b7280"),
+                        font=dict(size=11, color="#8e8e93"),
                         bgcolor="rgba(0,0,0,0)", tracegroupgap=2),
             hovermode="closest",
         )
@@ -1824,7 +1843,7 @@ def tab_dashboard() -> None:
             name="No realizado",
             x=df_pnl["Ticker"],
             y=df_pnl["No realizado"],
-            marker_color=["#34d399" if v >= 0 else "#f87171"
+            marker_color=["#30d158" if v >= 0 else "#ff453a"
                           for v in df_pnl["No realizado"]],
             marker_line_width=0,
             hovertemplate="<b>%{x}</b><br>No realizado: $%{y:+,.2f}<extra></extra>",
@@ -1835,7 +1854,7 @@ def tab_dashboard() -> None:
                 name="Realizado (ventas)",
                 x=df_pnl["Ticker"],
                 y=df_pnl["Realizado"],
-                marker_color=["rgba(52,211,153,0.45)" if v >= 0 else "rgba(248,113,113,0.45)"
+                marker_color=["rgba(48,209,88,0.45)" if v >= 0 else "rgba(255,69,58,0.45)"
                               for v in df_pnl["Realizado"]],
                 marker_line_width=0,
                 hovertemplate="<b>%{x}</b><br>Realizado: $%{y:+,.2f}<extra></extra>",
@@ -1844,15 +1863,15 @@ def tab_dashboard() -> None:
             **_pl(),
             barmode="stack",
             title=dict(text="P&L por posición (abierto + realizado)",
-                       font=dict(size=12, color="#4b5563"), x=0),
+                       font=dict(size=12, color="#636366"), x=0),
             height=280, margin=dict(t=36,b=20,l=10,r=10),
             xaxis=dict(showgrid=False, zeroline=False,
-                       tickfont=dict(size=11, color="#6b7280", family="DM Mono")),
+                       tickfont=dict(size=11, color="#8e8e93", family="DM Mono")),
             yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.03)",
                        zeroline=True, zerolinecolor="rgba(255,255,255,0.08)",
-                       tickfont=dict(size=10, color="#374151"), tickprefix="$"),
+                       tickfont=dict(size=10, color="#48484a"), tickprefix="$"),
             legend=dict(orientation="h", y=1.08, x=0,
-                        font=dict(size=10, color="#6b7280"),
+                        font=dict(size=10, color="#8e8e93"),
                         bgcolor="rgba(0,0,0,0)"),
             hovermode="x unified",
         )
@@ -1866,23 +1885,23 @@ def tab_dashboard() -> None:
                 x=df_dr2["Drift"]*100,
                 y=df_dr2["Emisora"],
                 orientation="h",
-                marker_color=["#34d399" if v>0 else "#f87171" for v in df_dr2["Drift"]],
+                marker_color=["#30d158" if v>0 else "#ff453a" for v in df_dr2["Drift"]],
                 marker_line_width=0,
                 hovertemplate="%{y}: %{x:+.1f}pp<extra></extra>",
                 text=[f"{v:+.1f}pp" for v in df_dr2["Drift"]*100],
                 textposition="outside",
-                textfont=dict(size=10, color="#6b7280", family="DM Mono"),
+                textfont=dict(size=10, color="#8e8e93", family="DM Mono"),
             ))
             fig_dr.update_layout(
                 **_pl(),
                 title=dict(text="Drift vs target allocation",
-                           font=dict(size=12, color="#4b5563"), x=0),
+                           font=dict(size=12, color="#636366"), x=0),
                 height=260, margin=dict(t=36,b=20,l=10,r=40),
                 xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.03)",
                            zeroline=True, zerolinecolor="rgba(255,255,255,0.1)",
-                           tickfont=dict(size=10, color="#374151"), ticksuffix="pp"),
+                           tickfont=dict(size=10, color="#48484a"), ticksuffix="pp"),
                 yaxis=dict(showgrid=False, zeroline=False,
-                           tickfont=dict(size=11, color="#6b7280", family="DM Mono")),
+                           tickfont=dict(size=11, color="#8e8e93", family="DM Mono")),
                 showlegend=False,
                 hovermode="y unified",
             )
@@ -1899,12 +1918,12 @@ def tab_dashboard() -> None:
     with hdr_col:
         st.markdown(
             "<div style='font-size:0.72rem;font-weight:700;letter-spacing:1.2px;"
-            "color:var(--accent, #4f8ef7);text-transform:uppercase;"
+            "color:var(--accent, #0a84ff);text-transform:uppercase;"
             "font-family:DM Mono,monospace;margin:18px 0 10px;position:relative;"
             "padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.07);'>"
             "<span class='live-dot'></span>MARKET PULSE — MOVIMIENTO DIARIO"
             "<div style='position:absolute;bottom:-1px;left:0;width:36px;height:2px;"
-            "background:linear-gradient(90deg,#4f8ef7,rgba(79,142,247,0));border-radius:2px;'>"
+            "background:linear-gradient(90deg,#0a84ff,rgba(10,132,255,0));border-radius:2px;'>"
             "</div></div>",
             unsafe_allow_html=True)
     with tog_col:
@@ -1923,11 +1942,11 @@ def tab_dashboard() -> None:
     pulse = pulse_shared if pulse_shared else fetch_pulse_data(_tickers_key)
 
     def _rsi_label(rsi):
-        if rsi is None: return "—", "#6b7280"
-        if rsi >= 70:   return f"RSI {rsi:.0f} ↑ OC", "#f87171"
-        if rsi <= 30:   return f"RSI {rsi:.0f} ↓ OS", "#34d399"
+        if rsi is None: return "—", "#8e8e93"
+        if rsi >= 70:   return f"RSI {rsi:.0f} ↑ OC", "#ff453a"
+        if rsi <= 30:   return f"RSI {rsi:.0f} ↓ OS", "#30d158"
         if rsi >= 55:   return f"RSI {rsi:.0f} ▲",    "#86efac"
-        return             f"RSI {rsi:.0f} ▼",         "#9ca3af"
+        return             f"RSI {rsi:.0f} ▼",         "#aeaeb2"
 
     def _vol_label(vr):
         if vr is None: return ""
@@ -1954,9 +1973,9 @@ def tab_dashboard() -> None:
 
         # Card color based on intraday move (vs open), more accurate
         chg    = chg_open if pd_.get("day_open", 0) > 0 else chg_prev
-        clr    = "#34d399" if chg >= 0 else "#f87171"
-        bg     = "rgba(52,211,153,0.04)" if chg >= 0 else "rgba(248,113,113,0.04)"
-        brd    = "rgba(52,211,153,0.15)" if chg >= 0 else "rgba(248,113,113,0.15)"
+        clr    = "#30d158" if chg >= 0 else "#ff453a"
+        bg     = "rgba(48,209,88,0.04)" if chg >= 0 else "rgba(255,69,58,0.04)"
+        brd    = "rgba(48,209,88,0.15)" if chg >= 0 else "rgba(255,69,58,0.15)"
         arr    = "▲" if chg >= 0 else "▼"
 
         rsi_txt, rsi_clr = _rsi_label(rsi)
@@ -1966,11 +1985,11 @@ def tab_dashboard() -> None:
         if sma is True:
             sma_tag = "<span style='color:#86efac;font-size:0.68rem;'>↑ SMA20</span>"
         elif sma is False:
-            sma_tag = "<span style='color:#f87171;font-size:0.68rem;'>↓ SMA20</span>"
+            sma_tag = "<span style='color:#ff453a;font-size:0.68rem;'>↓ SMA20</span>"
 
         chg1w_tag = ""
         if chg1w is not None:
-            c1w = "#34d399" if chg1w >= 0 else "#f87171"
+            c1w = "#30d158" if chg1w >= 0 else "#ff453a"
             chg1w_tag = (f"<span style='color:{c1w};font-size:0.72rem;"
                          f"font-family:DM Mono,monospace;'>1S: {chg1w:+.1%}</span>")
 
@@ -1984,9 +2003,9 @@ def tab_dashboard() -> None:
                 f"{i*(w_svg/(len(spark)-1)):.1f},{h_svg - (v-lo)/rng*(h_svg-4):.1f}"
                 for i, v in enumerate(spark)
             )
-            spark_clr = "#34d399" if chg >= 0 else "#f87171"
+            spark_clr = "#30d158" if chg >= 0 else "#ff453a"
             fill_id   = f"sfill_{t.replace('-','')}"
-            fill_clr_a = "rgba(52,211,153,0.18)" if chg >= 0 else "rgba(248,113,113,0.12)"
+            fill_clr_a = "rgba(48,209,88,0.18)" if chg >= 0 else "rgba(255,69,58,0.12)"
             pts_fill = (f"0,{h_svg} " + pts + f" {w_svg},{h_svg}")
             # Add a horizontal baseline at last price
             last_y = f"{h_svg - (spark[-1]-lo)/rng*(h_svg-4):.1f}"
@@ -2006,25 +2025,25 @@ def tab_dashboard() -> None:
             )
 
         # ── Colores según dirección ─────────────────────────────
-        prev_clr = "#34d399" if chg_prev >= 0 else "#f87171"
+        prev_clr = "#30d158" if chg_prev >= 0 else "#ff453a"
         prev_arr = "▲" if chg_prev >= 0 else "▼"
-        open_clr = "#34d399" if chg_open >= 0 else "#f87171"
+        open_clr = "#30d158" if chg_open >= 0 else "#ff453a"
         open_arr = "▲" if chg_open >= 0 else "▼"
         has_open = pd_.get("day_open", 0) > 0
         pnl_val  = float(row_data["P&L $"])
-        pnl_clr  = "#34d399" if pnl_val >= 0 else "#f87171"
+        pnl_clr  = "#30d158" if pnl_val >= 0 else "#ff453a"
         weight_w = min(100, int(float(row_data["Peso"]) * 100 * 4))  # scale for bar
 
         # RSI badge with background
         rsi_badge = (
-            f"<span style='background:rgba({('52,211,153' if rsi_clr=='#34d399' or rsi_clr=='#86efac' else ('248,113,113' if rsi_clr=='#f87171' else '156,163,175'))},.12);"
+            f"<span style='background:rgba({('48,209,88' if rsi_clr=='#30d158' or rsi_clr=='#86efac' else ('255,69,58' if rsi_clr=='#ff453a' else '142,142,147'))},.12);"
             f"color:{rsi_clr};border:1px solid {rsi_clr}22;border-radius:5px;"
             f"padding:1px 7px;font-size:0.68rem;font-family:DM Mono,monospace;"
             f"font-weight:700;'>{rsi_txt}</span>"
             if rsi is not None else ""
         )
         vol_badge = (
-            f"<span style='color:#6b7280;font-size:0.68rem;font-family:DM Mono,monospace;"
+            f"<span style='color:#8e8e93;font-size:0.68rem;font-family:DM Mono,monospace;"
             f"background:rgba(255,255,255,0.04);border-radius:5px;padding:1px 6px;'>{vol_txt}</span>"
             if vol_txt else ""
         )
@@ -2032,7 +2051,7 @@ def tab_dashboard() -> None:
         open_row = (
             f"<div style='font-size:0.68rem;color:{open_clr};font-family:DM Mono,monospace;"
             f"margin-top:1px;opacity:.85;'>{open_arr} {abs(chg_open):.2%} "
-            f"<span style='color:#4b5563;font-size:.6rem;'>apertura</span></div>"
+            f"<span style='color:#636366;font-size:.6rem;'>apertura</span></div>"
             if has_open else ""
         )
 
@@ -2044,7 +2063,7 @@ def tab_dashboard() -> None:
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px;">
     <div>
       <div style="font-family:DM Mono,monospace;font-weight:900;font-size:0.95rem;
-                  color:#e5e7eb;letter-spacing:0.2px;line-height:1;">{t}</div>
+                  color:#ffffff;letter-spacing:0.2px;line-height:1;">{t}</div>
       <div style="font-family:DM Mono,monospace;font-size:1.5rem;font-weight:700;
                   color:#fff;line-height:1.1;margin-top:3px;letter-spacing:-1px;">
         ${price:,.2f}</div>
@@ -2052,7 +2071,7 @@ def tab_dashboard() -> None:
     <div style="text-align:right;">
       <div style="font-family:DM Mono,monospace;font-size:1.3rem;font-weight:700;
                   color:{prev_clr};line-height:1;">{prev_arr} {abs(chg_prev):.2%}</div>
-      <div style="font-size:0.6rem;color:#4b5563;margin-top:1px;font-family:DM Mono,monospace;">
+      <div style="font-size:0.6rem;color:#636366;margin-top:1px;font-family:DM Mono,monospace;">
         vs cierre anterior</div>
       {open_row}
     </div>
@@ -2076,16 +2095,16 @@ def tab_dashboard() -> None:
   <div style="display:flex;justify-content:space-between;align-items:center;
               margin-top:8px;">
     <div>
-      <div style="font-size:0.62rem;color:#4b5563;font-family:DM Mono,monospace;
+      <div style="font-size:0.62rem;color:#636366;font-family:DM Mono,monospace;
                   text-transform:uppercase;letter-spacing:.5px;">P&amp;L</div>
       <div style="font-family:DM Mono,monospace;font-weight:700;font-size:0.88rem;
                   color:{pnl_clr};">${pnl_val:+,.2f}</div>
     </div>
     <div style="text-align:right;">
-      <div style="font-size:0.62rem;color:#4b5563;font-family:DM Mono,monospace;
+      <div style="font-size:0.62rem;color:#636366;font-family:DM Mono,monospace;
                   text-transform:uppercase;letter-spacing:.5px;">CARTERA</div>
       <div style="font-family:DM Mono,monospace;font-weight:700;font-size:0.88rem;
-                  color:#9ca3af;">{float(row_data["Peso"]):.1%}</div>
+                  color:#aeaeb2;">{float(row_data["Peso"]):.1%}</div>
     </div>
   </div>
 
@@ -2109,20 +2128,20 @@ def tab_dashboard() -> None:
             _pnl  = float(_rd["P&L $"])
             _pnlp = float(_rd["P&L %"])
             _peso = float(_rd["Peso"])
-            _dc   = "#34d399" if _pc >= 0 else "#f87171"
+            _dc   = "#30d158" if _pc >= 0 else "#ff453a"
             _pc_arr = "▲" if _pc >= 0 else "▼"
-            _pnl_c = "#34d399" if _pnl >= 0 else "#f87171"
-            _rsi_c = ("#f87171" if (_rsi or 50) >= 70 else
-                      "#34d399" if (_rsi or 50) <= 30 else "#6b7280")
+            _pnl_c = "#30d158" if _pnl >= 0 else "#ff453a"
+            _rsi_c = ("#ff453a" if (_rsi or 50) >= 70 else
+                      "#30d158" if (_rsi or 50) <= 30 else "#8e8e93")
             _rsi_s = f"{_rsi:.0f}" if _rsi else "—"
             _tbl_rows += f"""
 <tr onmouseover="this.style.background='rgba(255,255,255,0.025)'"
     onmouseout="this.style.background='transparent'"
     style="border-bottom:1px solid rgba(255,255,255,0.04);transition:background .15s;">
   <td style="padding:10px 16px;font-family:DM Mono,monospace;font-weight:800;
-             font-size:0.88rem;color:#4f8ef7;white-space:nowrap;">{_tt}</td>
+             font-size:0.88rem;color:#0a84ff;white-space:nowrap;">{_tt}</td>
   <td style="padding:10px 16px;font-family:DM Mono,monospace;font-weight:700;
-             font-size:0.88rem;color:#e5e7eb;white-space:nowrap;">${_pr:,.2f}</td>
+             font-size:0.88rem;color:#ffffff;white-space:nowrap;">${_pr:,.2f}</td>
   <td style="padding:10px 12px;font-family:DM Mono,monospace;font-size:0.88rem;
              font-weight:700;color:{_dc};white-space:nowrap;">
     {_pc_arr} {abs(_pc):.2%}</td>
@@ -2135,15 +2154,15 @@ def tab_dashboard() -> None:
     <div style="display:flex;align-items:center;gap:7px;">
       <div style="flex:1;background:rgba(255,255,255,0.06);border-radius:3px;height:3px;">
         <div style="width:{min(100,_peso*100*4):.0f}%;height:100%;
-                    background:#4f8ef7;border-radius:3px;"></div>
+                    background:#0a84ff;border-radius:3px;"></div>
       </div>
-      <span style="font-size:0.74rem;color:#6b7280;font-family:DM Mono,monospace;
+      <span style="font-size:0.74rem;color:#8e8e93;font-family:DM Mono,monospace;
                    white-space:nowrap;">{_peso:.1%}</span>
     </div>
   </td>
 </tr>"""
         _th2 = ("padding:9px 16px;text-align:left;font-family:DM Mono,monospace;"
-                "font-size:0.67rem;font-weight:700;color:#4b5563;text-transform:uppercase;"
+                "font-size:0.67rem;font-weight:700;color:#636366;text-transform:uppercase;"
                 "letter-spacing:.9px;border-bottom:1px solid rgba(255,255,255,0.07);"
                 "background:rgba(255,255,255,0.025);white-space:nowrap;")
         st.markdown(f"""
@@ -2175,12 +2194,12 @@ def tab_dashboard() -> None:
     # ═══════════════════════════════════════════════════════════
     st.markdown(
         "<div style='font-size:0.72rem;font-weight:700;letter-spacing:1.2px;"
-        "color:#4f8ef7;text-transform:uppercase;font-family:DM Mono,monospace;"
+        "color:#0a84ff;text-transform:uppercase;font-family:DM Mono,monospace;"
         "margin:20px 0 10px;position:relative;padding-bottom:8px;"
         "border-bottom:1px solid rgba(255,255,255,0.07);'>"
         "MIS POSICIONES"
         "<div style='position:absolute;bottom:-1px;left:0;width:36px;height:2px;"
-        "background:linear-gradient(90deg,#4f8ef7,rgba(79,142,247,0));border-radius:2px;'>"
+        "background:linear-gradient(90deg,#0a84ff,rgba(10,132,255,0));border-radius:2px;'>"
         "</div></div>",
         unsafe_allow_html=True)
 
@@ -2200,19 +2219,19 @@ def tab_dashboard() -> None:
         _avg     = float(_rd["Cto. Prom."])
         _drift   = float(_rd.get("Drift", 0) or 0)
 
-        _pnl_rgb  = "52,211,153" if _pnl_pct >= 0 else "248,113,113"
-        _pnl_clr  = "#34d399"  if _pnl_pct >= 0 else "#f87171"
-        _day_clr  = "#34d399"  if _day_pct >= 0 else "#f87171"
+        _pnl_rgb  = "48,209,88" if _pnl_pct >= 0 else "255,69,58"
+        _pnl_clr  = "#30d158"  if _pnl_pct >= 0 else "#ff453a"
+        _day_clr  = "#30d158"  if _day_pct >= 0 else "#ff453a"
         _day_arr  = "▲"        if _day_pct >= 0 else "▼"
-        _drclr    = ("#34d399" if _drift > 0.005 else
-                     "#f87171" if _drift < -0.005 else "#6b7280")
+        _drclr    = ("#30d158" if _drift > 0.005 else
+                     "#ff453a" if _drift < -0.005 else "#8e8e93")
 
         _mini = ""
         if len(_spark) >= 4:
             _ws, _hs = 80, 28
             _lo, _hi = min(_spark), max(_spark)
             _rng = _hi - _lo if _hi != _lo else 1.0
-            _sc  = "#34d399" if _day_pct >= 0 else "#f87171"
+            _sc  = "#30d158" if _day_pct >= 0 else "#ff453a"
             _fid = f"spf_{_t.replace('-','').replace('.','')}"
             _pts = " ".join(
                 f"{i*(_ws/(len(_spark)-1)):.1f},{_hs-(_v-_lo)/_rng*(_hs-3):.1f}"
@@ -2240,38 +2259,38 @@ def tab_dashboard() -> None:
     style="border-bottom:1px solid rgba(255,255,255,0.04);transition:background .15s;">
   <td style="padding:12px 20px 12px 20px;white-space:nowrap;">
     <div style="font-family:DM Mono,monospace;font-weight:800;font-size:0.88rem;
-                color:#4f8ef7;background:rgba(79,142,247,.1);
-                border:1px solid rgba(79,142,247,.2);border-radius:6px;
+                color:#0a84ff;background:rgba(10,132,255,.1);
+                border:1px solid rgba(10,132,255,.2);border-radius:6px;
                 padding:3px 10px;display:inline-block;">{_t}</div>
-    <div style="font-size:0.67rem;color:#4b5563;font-family:DM Mono,monospace;
+    <div style="font-size:0.67rem;color:#636366;font-family:DM Mono,monospace;
                 margin-top:3px;">{_shares:.4f} × ${_avg:,.2f}</div>
   </td>
   <td style="padding:10px 16px;">
     {_mini if _mini else '<div style="width:80px;height:28px;background:rgba(255,255,255,0.025);border-radius:4px;"></div>'}
   </td>
   <td style="padding:10px 16px;font-family:DM Mono,monospace;font-weight:700;
-             font-size:0.9rem;color:#e5e7eb;white-space:nowrap;">${_price:,.2f}</td>
+             font-size:0.9rem;color:#ffffff;white-space:nowrap;">${_price:,.2f}</td>
   <td style="padding:10px 12px;white-space:nowrap;">
     <div style="background:rgba({_pnl_rgb},.1);color:{_pnl_clr};
                 border:1px solid rgba({_pnl_rgb},.22);border-radius:20px;
                 padding:3px 10px;font-family:DM Mono,monospace;
                 font-size:0.82rem;font-weight:700;display:inline-block;">
       {_pnl_pct*100:+.2f}%</div>
-    <div style="font-size:0.68rem;color:#4b5563;font-family:DM Mono,monospace;
+    <div style="font-size:0.68rem;color:#636366;font-family:DM Mono,monospace;
                 margin-top:2px;">${_pnl_usd:+,.2f}</div>
   </td>
   <td style="padding:10px 12px;font-family:DM Mono,monospace;font-size:0.86rem;
              font-weight:700;color:{_day_clr};white-space:nowrap;">
     {_day_arr} {abs(_day_pct*100):.2f}%</td>
   <td style="padding:10px 16px;font-family:DM Mono,monospace;font-size:0.86rem;
-             color:#e5e7eb;font-weight:600;white-space:nowrap;">${_valor:,.2f}</td>
+             color:#ffffff;font-weight:600;white-space:nowrap;">${_valor:,.2f}</td>
   <td style="padding:10px 20px 10px 16px;min-width:130px;">
     <div style="display:flex;align-items:center;gap:8px;">
       <div style="flex:1;background:rgba(255,255,255,0.06);border-radius:4px;
                   height:4px;overflow:hidden;min-width:60px;">
-        <div style="width:{_pw:.0f}%;height:100%;background:#4f8ef7;border-radius:4px;"></div>
+        <div style="width:{_pw:.0f}%;height:100%;background:#0a84ff;border-radius:4px;"></div>
       </div>
-      <span style="font-family:DM Mono,monospace;font-size:0.76rem;color:#6b7280;
+      <span style="font-family:DM Mono,monospace;font-size:0.76rem;color:#8e8e93;
                    white-space:nowrap;min-width:38px;text-align:right;">
         {_peso*100:.1f}%</span>
     </div>
@@ -2282,7 +2301,7 @@ def tab_dashboard() -> None:
 </tr>"""
 
     _th = ("padding:10px 16px;text-align:left;font-family:DM Mono,monospace;"
-           "font-size:0.67rem;font-weight:700;color:#4b5563;text-transform:uppercase;"
+           "font-size:0.67rem;font-weight:700;color:#636366;text-transform:uppercase;"
            "letter-spacing:.9px;border-bottom:1px solid rgba(255,255,255,0.07);"
            "background:rgba(255,255,255,0.025);white-space:nowrap;")
     st.markdown(f"""
@@ -2313,8 +2332,8 @@ def tab_dashboard() -> None:
         rows_html = ""
         for _, r in recent.iterrows():
             is_buy  = str(r["Type"]).upper() == "BUY"
-            clr     = "#34d399" if is_buy else "#f87171"
-            bg_rgb  = "52,211,153" if is_buy else "248,113,113"
+            clr     = "#30d158" if is_buy else "#ff453a"
+            bg_rgb  = "48,209,88" if is_buy else "255,69,58"
             icon    = "↑" if is_buy else "↓"
             monto   = float(r["Shares"]) * float(r["Price"])
             tipo    = "Compra" if is_buy else "Venta"
@@ -2328,9 +2347,9 @@ def tab_dashboard() -> None:
                 background:rgba({bg_rgb},0.12);display:flex;align-items:center;
                 justify-content:center;font-size:1rem;color:{clr};font-weight:700;">{icon}</div>
     <div>
-      <span style="font-family:DM Mono,monospace;font-weight:700;color:#e5e7eb;
+      <span style="font-family:DM Mono,monospace;font-weight:700;color:#ffffff;
                    font-size:0.88rem;">{r["Ticker"]}</span>
-      <span style="font-size:0.76rem;color:#6b7280;margin-left:8px;">
+      <span style="font-size:0.76rem;color:#8e8e93;margin-left:8px;">
         {tipo} · {float(r["Shares"]):.4f} @ ${float(r["Price"]):.2f}{notes_s}
       </span>
     </div>
@@ -2338,18 +2357,18 @@ def tab_dashboard() -> None:
   <div style="text-align:right;flex-shrink:0;">
     <div style="font-family:DM Mono,monospace;font-weight:700;color:{clr};
                 font-size:0.88rem;">{sign}${monto:,.2f}</div>
-    <div style="font-size:0.7rem;color:#374151;">{r["Date"]}</div>
+    <div style="font-size:0.7rem;color:#48484a;">{r["Date"]}</div>
   </div>
 </div>"""
 
         st.markdown(f"""
 <div style="margin-top:16px;">
-  <div style="font-size:0.72rem;font-weight:700;letter-spacing:1.2px;color:#4f8ef7;
+  <div style="font-size:0.72rem;font-weight:700;letter-spacing:1.2px;color:#0a84ff;
               text-transform:uppercase;font-family:DM Mono,monospace;margin-bottom:12px;
               position:relative;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.07);">
     ACTIVIDAD RECIENTE
     <div style="position:absolute;bottom:-1px;left:0;width:36px;height:2px;
-                background:linear-gradient(90deg,#4f8ef7,rgba(79,142,247,0));border-radius:2px;"></div>
+                background:linear-gradient(90deg,#0a84ff,rgba(10,132,255,0));border-radius:2px;"></div>
   </div>
   <div style="background:rgba(10,14,26,0.6);border:1px solid rgba(255,255,255,0.07);
               border-radius:18px;padding:4px 20px 4px;
@@ -2717,8 +2736,8 @@ def tab_editor() -> None:
         # Botones de porcentaje rápido solo al vender y si hay posición
         if is_sell and owned_now > 0:
             st.markdown(
-                f"<div style='font-size:0.72rem;color:#6b7280;font-family:DM Mono,monospace;"
-                f"margin-bottom:4px;'>Tienes <b style='color:#e5e7eb'>{owned_now:.6f}</b> títulos — venta rápida:</div>",
+                f"<div style='font-size:0.72rem;color:#8e8e93;font-family:DM Mono,monospace;"
+                f"margin-bottom:4px;'>Tienes <b style='color:#ffffff'>{owned_now:.6f}</b> títulos — venta rápida:</div>",
                 unsafe_allow_html=True)
             qb1, qb2, qb3, qb4 = st.columns(4)
             pcts = [(qb1,"25%",0.25),(qb2,"50%",0.50),(qb3,"75%",0.75),(qb4,"100% 🔴",1.0)]
@@ -2753,7 +2772,7 @@ def tab_editor() -> None:
         # Preview del impacto ANTES de confirmar
         if txn_shares > 0 and txn_price > 0:
             monto = txn_shares * txn_price
-            color_prev = "#34d399" if not is_sell else "#f87171"
+            color_prev = "#30d158" if not is_sell else "#ff453a"
             tipo_label = "Compra" if not is_sell else "Venta"
             pct_pos = f" ({txn_shares/owned_now:.0%} de tu posición)" if is_sell and owned_now > 0 else ""
             st.markdown(f"""
@@ -2762,9 +2781,9 @@ def tab_editor() -> None:
             font-size:0.85rem;border:1px solid rgba(255,255,255,0.07);">
   <span style="color:{color_prev};font-weight:700;">{tipo_label}</span>
   &nbsp;·&nbsp; {txn_shares:.6f} títulos de
-  <b style="color:#e5e7eb">{txn_ticker}</b>{pct_pos}
+  <b style="color:#ffffff">{txn_ticker}</b>{pct_pos}
   &nbsp;·&nbsp; @ ${txn_price:.4f}
-  <br><span style="color:#9ca3af;">Monto total: </span>
+  <br><span style="color:#aeaeb2;">Monto total: </span>
   <b style="color:{color_prev};">${monto:,.2f}</b>
 </div>""", unsafe_allow_html=True)
 
@@ -2931,7 +2950,7 @@ def tab_editor() -> None:
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.markdown(
                         "<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
-                        "color:#4b5563;text-transform:uppercase;font-family:DM Mono,monospace;"
+                        "color:#636366;text-transform:uppercase;font-family:DM Mono,monospace;"
                         "margin-bottom:6px;'>POSICIONES CERRADAS (P&L REALIZADO)</div>",
                         unsafe_allow_html=True)
                     df_closed = pd.DataFrame(closed_rows).sort_values(
@@ -2952,10 +2971,10 @@ def tab_editor() -> None:
                         use_container_width=True,
                     )
                     total_closed_pnl = sum(r["P&L Real. $"] for r in closed_rows)
-                    clr = "#34d399" if total_closed_pnl >= 0 else "#f87171"
+                    clr = "#30d158" if total_closed_pnl >= 0 else "#ff453a"
                     st.markdown(
                         f"<div style='font-family:DM Mono,monospace;font-size:0.82rem;"
-                        f"color:#9ca3af;margin-top:4px;'>Total P&L realizado posiciones cerradas: "
+                        f"color:#aeaeb2;margin-top:4px;'>Total P&L realizado posiciones cerradas: "
                         f"<b style='color:{clr};'>${total_closed_pnl:+,.2f}</b></div>",
                         unsafe_allow_html=True)
 
@@ -2995,7 +3014,7 @@ def tab_editor() -> None:
 
                 total_w = sum(tw_updated.values())
                 ok = abs(total_w - 1.0) < 0.005
-                color = "#34d399" if ok else "#f87171"
+                color = "#30d158" if ok else "#ff453a"
                 st.markdown(
                     f"<p style='font-family:var(--mono); font-size:0.9rem; margin-top:10px;'>"
                     f"Total: <strong style='color:{color};'>{total_w:.1%}</strong> "
@@ -3635,7 +3654,7 @@ def tab_rebalance() -> None:
                 for t, w in sorted(tw.items(), key=lambda x: -x[1]):
                     st.markdown(
                         f"<span style='font-family:var(--mono);font-size:0.83rem;'>"
-                        f"<b style='color:#e5e7eb'>{t}</b> &nbsp; {w:.1%}</span>",
+                        f"<b style='color:#ffffff'>{t}</b> &nbsp; {w:.1%}</span>",
                         unsafe_allow_html=True)
                 st.divider()
                 run1 = st.button("⚖️ Calcular Rebalanceo", type="primary",
@@ -3698,7 +3717,7 @@ def tab_rebalance() -> None:
             opt_universe = list(dict.fromkeys(tickers_held + extra2))
             for t in opt_universe:
                 st.markdown(
-                    f"<span style='font-family:var(--mono);font-size:0.82rem;color:#9ca3af;'>• {t}</span>",
+                    f"<span style='font-family:var(--mono);font-size:0.82rem;color:#aeaeb2;'>• {t}</span>",
                     unsafe_allow_html=True)
 
             st.divider()
@@ -3991,11 +4010,11 @@ def tab_rebalance() -> None:
                     sk1, sk2, sk3 = st.columns(3)
                     with sk1:
                         kpi_card("Retorno Esperado", f"{opt_ret:.1%}", "anualizado",
-                                 accent="#34d399" if opt_ret > 0 else "#f87171")
+                                 accent="#30d158" if opt_ret > 0 else "#ff453a")
                     with sk2:
-                        kpi_card("Volatilidad", f"{opt_vol:.1%}", "anualizada", accent="#fbbf24")
+                        kpi_card("Volatilidad", f"{opt_vol:.1%}", "anualizada", accent="#ffd60a")
                     with sk3:
-                        kpi_card("Sharpe Ratio", f"{opt_sharpe:.2f}", "", accent="#4f8ef7")
+                        kpi_card("Sharpe Ratio", f"{opt_sharpe:.2f}", "", accent="#0a84ff")
 
                     # ── Reporte del filtro técnico ────────────────
                     _tech_rep = st.session_state.get("opt_tech_report", [])
@@ -4004,21 +4023,21 @@ def tab_rebalance() -> None:
                             f"<div style='display:flex;justify-content:space-between;"
                             f"padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);'>"
                             f"<span style='font-family:DM Mono,monospace;font-weight:700;"
-                            f"color:#e5e7eb;'>{t}</span>"
-                            f"<span style='color:#f87171;font-size:0.82rem;'>{sig}</span>"
-                            f"<span style='color:#6b7280;font-family:DM Mono,monospace;"
+                            f"color:#ffffff;'>{t}</span>"
+                            f"<span style='color:#ff453a;font-size:0.82rem;'>{sig}</span>"
+                            f"<span style='color:#8e8e93;font-family:DM Mono,monospace;"
                             f"font-size:0.8rem;'>score {sc}</span></div>"
                             for t, sc, sig in _tech_rep
                         )
                         st.markdown(
-                            f"<div style='background:rgba(248,113,113,0.07);"
-                            f"border:1px solid rgba(248,113,113,0.25);border-radius:12px;"
+                            f"<div style='background:rgba(255,69,58,0.07);"
+                            f"border:1px solid rgba(255,69,58,0.25);border-radius:12px;"
                             f"padding:14px 18px;margin-bottom:12px;'>"
                             f"<div style='font-size:0.65rem;font-weight:700;letter-spacing:1.5px;"
-                            f"color:#f87171;text-transform:uppercase;font-family:DM Mono,monospace;"
+                            f"color:#ff453a;text-transform:uppercase;font-family:DM Mono,monospace;"
                             f"margin-bottom:10px;'>🚫 EXCLUIDOS POR FILTRO TÉCNICO</div>"
                             f"{_excl_lines}"
-                            f"<div style='font-size:0.72rem;color:#6b7280;margin-top:8px;'>"
+                            f"<div style='font-size:0.72rem;color:#8e8e93;margin-top:8px;'>"
                             f"Estos activos tenían señal de venta y se excluyeron del universo "
                             f"de optimización. Los 🔒 protegidos nunca se excluyen.</div>"
                             f"</div>",
@@ -4048,7 +4067,7 @@ def tab_rebalance() -> None:
                             y=[mu_d.get(t,0)*100  for t in valid_t],
                             mode="markers+text",
                             text=valid_t, textposition="top center",
-                            marker=dict(color="#6b7280", size=9, symbol="circle-open",
+                            marker=dict(color="#8e8e93", size=9, symbol="circle-open",
                                         line=dict(width=1.5)),
                             name="Activos",
                             hovertemplate="%{text}<br>Vol:%{x:.1f}% Ret:%{y:.1f}%<extra></extra>",
@@ -4057,7 +4076,7 @@ def tab_rebalance() -> None:
                             x=[opt_vol*100], y=[opt_ret*100],
                             mode="markers+text",
                             text=[strat_used], textposition="top right",
-                            marker=dict(color="#34d399", size=18, symbol="star",
+                            marker=dict(color="#30d158", size=18, symbol="star",
                                         line=dict(color="white", width=1.5)),
                             name=strat_used,
                         ))
@@ -4080,7 +4099,7 @@ def tab_rebalance() -> None:
                         sc_mu     = st.session_state["smart_cluster_mu"]
                         sc_vol    = st.session_state["smart_cluster_vol"]
                         sc_w      = st.session_state.get("opt_weights_generated", {})
-                        CCOLS = ["#4f8ef7","#34d399","#fbbf24","#f87171","#a78bfa","#fb923c"]
+                        CCOLS = ["#0a84ff","#30d158","#ffd60a","#ff453a","#a78bfa","#fb923c"]
                         fig_sc = go.Figure()
                         for k in sorted(set(sc_labels.values())):
                             t_in_k = [t for t, lbl in sc_labels.items() if lbl == k]
@@ -4422,22 +4441,22 @@ def tab_rebalance() -> None:
 
                         # Card visual state based on decision
                         if decision is True:
-                            card_border  = "rgba(52,211,153,0.45)"
-                            card_bg      = "rgba(52,211,153,0.04)"
-                            status_badge = ("<span style='background:rgba(52,211,153,0.15);"
-                                            "color:#34d399;padding:2px 10px;border-radius:20px;"
+                            card_border  = "rgba(48,209,88,0.45)"
+                            card_bg      = "rgba(48,209,88,0.04)"
+                            status_badge = ("<span style='background:rgba(48,209,88,0.15);"
+                                            "color:#30d158;padding:2px 10px;border-radius:20px;"
                                             "font-size:0.7rem;font-weight:700;'>✅ ACEPTADO</span>")
                         elif decision is False:
-                            card_border  = "rgba(107,114,128,0.25)"
+                            card_border  = "rgba(142,142,147,0.25)"
                             card_bg      = "rgba(17,17,24,0.6)"
-                            status_badge = ("<span style='background:rgba(107,114,128,0.15);"
-                                            "color:#6b7280;padding:2px 10px;border-radius:20px;"
+                            status_badge = ("<span style='background:rgba(142,142,147,0.15);"
+                                            "color:#8e8e93;padding:2px 10px;border-radius:20px;"
                                             "font-size:0.7rem;font-weight:700;'>❌ RECHAZADO</span>")
                         else:
                             card_border  = "rgba(255,255,255,0.08)"
                             card_bg      = "rgba(22,22,31,0.85)"
-                            status_badge = ("<span style='background:rgba(251,191,36,0.15);"
-                                            "color:#fbbf24;padding:2px 10px;border-radius:20px;"
+                            status_badge = ("<span style='background:rgba(255,214,10,0.15);"
+                                            "color:#ffd60a;padding:2px 10px;border-radius:20px;"
                                             "font-size:0.7rem;font-weight:700;'>⏳ PENDIENTE</span>")
 
                         # Pre-build buy panel HTML to avoid backslash in f-string
@@ -4445,16 +4464,16 @@ def tab_rebalance() -> None:
                             buy_name_html  = (f"<div style='font-size:1.3rem;font-weight:800;"
                                               f"color:#fff;font-family:DM Mono,monospace;'>"
                                               f"{buy_t}</div>")
-                            buy_sig_html   = (f"<div style='font-size:0.78rem;color:#9ca3af;"
+                            buy_sig_html   = (f"<div style='font-size:0.78rem;color:#aeaeb2;"
                                               f"margin-top:4px;'>{buy_sig}</div>")
-                            buy_score_clr  = "color:#34d399;"
-                            buy_score_html = (f"<div style='font-size:0.72rem;color:#6b7280;"
+                            buy_score_clr  = "color:#30d158;"
+                            buy_score_html = (f"<div style='font-size:0.72rem;color:#8e8e93;"
                                               f"margin-top:2px;'>Ret: {buy_ret_s} &nbsp;·&nbsp; "
                                               f"Score: <span style='{buy_score_clr}'>"
                                               f"{buy_score}</span></div>"
                                               if buy_score is not None else "")
                         else:
-                            buy_name_html  = ("<div style='font-size:0.85rem;color:#6b7280;'>"
+                            buy_name_html  = ("<div style='font-size:0.85rem;color:#8e8e93;'>"
                                               "Sin candidato disponible</div>")
                             buy_sig_html   = ""
                             buy_score_html = ""
@@ -4463,26 +4482,26 @@ def tab_rebalance() -> None:
 <div style="background:{card_bg};border:1px solid {card_border};
             border-radius:16px;padding:18px 20px;margin-bottom:6px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-    <div style="font-size:0.62rem;font-weight:700;letter-spacing:2px;color:#4b5563;
+    <div style="font-size:0.62rem;font-weight:700;letter-spacing:2px;color:#636366;
                 text-transform:uppercase;font-family:DM Mono,monospace;">SWAP #{i+1}</div>
     {status_badge}
   </div>
   <div style="display:grid;grid-template-columns:1fr 40px 1fr;gap:12px;align-items:center;">
-    <div style="background:rgba(248,113,113,0.07);border:1px solid rgba(248,113,113,0.2);
+    <div style="background:rgba(255,69,58,0.07);border:1px solid rgba(255,69,58,0.2);
                 border-radius:12px;padding:14px 16px;">
-      <div style="font-size:0.65rem;color:#f87171;text-transform:uppercase;
+      <div style="font-size:0.65rem;color:#ff453a;text-transform:uppercase;
                   letter-spacing:1px;font-family:DM Mono,monospace;margin-bottom:6px;">VENDER</div>
       <div style="font-size:1.3rem;font-weight:800;color:#fff;
                   font-family:DM Mono,monospace;">{sell_t}</div>
-      <div style="font-size:0.78rem;color:#9ca3af;margin-top:4px;">{sell_sig}</div>
-      <div style="font-size:0.72rem;color:#6b7280;margin-top:2px;">
-        Ret: {sell_ret_s} &nbsp;·&nbsp; Score: <span style="color:#f87171;">{sell_score}</span>
+      <div style="font-size:0.78rem;color:#aeaeb2;margin-top:4px;">{sell_sig}</div>
+      <div style="font-size:0.72rem;color:#8e8e93;margin-top:2px;">
+        Ret: {sell_ret_s} &nbsp;·&nbsp; Score: <span style="color:#ff453a;">{sell_score}</span>
       </div>
     </div>
-    <div style="text-align:center;font-size:1.4rem;color:#4b5563;">→</div>
-    <div style="background:rgba(52,211,153,0.07);border:1px solid rgba(52,211,153,0.2);
+    <div style="text-align:center;font-size:1.4rem;color:#636366;">→</div>
+    <div style="background:rgba(48,209,88,0.07);border:1px solid rgba(48,209,88,0.2);
                 border-radius:12px;padding:14px 16px;">
-      <div style="font-size:0.65rem;color:#34d399;text-transform:uppercase;
+      <div style="font-size:0.65rem;color:#30d158;text-transform:uppercase;
                   letter-spacing:1px;font-family:DM Mono,monospace;margin-bottom:6px;">COMPRAR</div>
       {buy_name_html}
       {buy_sig_html}
@@ -4564,7 +4583,7 @@ def tab_rebalance() -> None:
                             st.markdown("<br>", unsafe_allow_html=True)
                             st.markdown(
                                 "<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
-                                "color:#4b5563;text-transform:uppercase;font-family:DM Mono,monospace;"
+                                "color:#636366;text-transform:uppercase;font-family:DM Mono,monospace;"
                                 "margin-bottom:8px;'>LLEVAR AL OPTIMIZADOR</div>",
                                 unsafe_allow_html=True)
                             st.caption(
@@ -4605,11 +4624,11 @@ def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
     with k1: kpi_card("NAV Actual",      f"${result['nav']:,.0f}")
     with k2: kpi_card("Capital Total",   f"${result['total_capital']:,.0f}",
                       f"+ ${new_capital:,.0f} nuevo" if new_capital > 0 else "")
-    with k3: kpi_card("Compras",  f"${result['buys_total']:,.0f}",  accent="#34d399")
-    with k4: kpi_card("Ventas",   f"${result['sells_total']:,.0f}", accent="#f87171" if result["sells_total"] > 0 else "")
+    with k3: kpi_card("Compras",  f"${result['buys_total']:,.0f}",  accent="#30d158")
+    with k4: kpi_card("Ventas",   f"${result['sells_total']:,.0f}", accent="#ff453a" if result["sells_total"] > 0 else "")
 
     k5, k6, k7, _ = st.columns(4)
-    with k5: kpi_card("Turnover",    f"{result['turnover']:.1%}", accent="#fbbf24")
+    with k5: kpi_card("Turnover",    f"{result['turnover']:.1%}", accent="#ffd60a")
     with k6: kpi_card("N° Trades",   str(result.get("n_trades", 0)))
     with k7:
         comm = result.get("estimated_commissions", 0)
@@ -4633,7 +4652,7 @@ def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
         # ── Vista para EJECUTAR en broker (Ticker, Acción, Monto, Títulos) ──
         st.markdown(
             "<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
-            "color:#4b5563;text-transform:uppercase;font-family:DM Mono,monospace;"
+            "color:#636366;text-transform:uppercase;font-family:DM Mono,monospace;"
             "margin-bottom:6px;'>ÓRDENES A EJECUTAR</div>",
             unsafe_allow_html=True)
 
@@ -4702,11 +4721,11 @@ def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
     fig_ba = go.Figure()
     fig_ba.add_trace(go.Bar(name="Actual",   x=all_t,
                             y=[cw.get(t,0)*100 for t in all_t],
-                            marker_color="#4f8ef7",
+                            marker_color="#0a84ff",
                             hovertemplate="%{x}: %{y:.1f}%<extra>Actual</extra>"))
     fig_ba.add_trace(go.Bar(name="Objetivo", x=all_t,
                             y=[tw.get(t,0)*100 for t in all_t],
-                            marker_color="#34d399", opacity=0.75,
+                            marker_color="#30d158", opacity=0.75,
                             hovertemplate="%{x}: %{y:.1f}%<extra>Objetivo</extra>"))
     fig_ba.update_layout(**PLOTLY_LAYOUT, barmode="group",
                          yaxis_title="Peso (%)", height=320)
@@ -5013,32 +5032,32 @@ def _fmt_big(n) -> str:
 def _analyst_badge(key: str) -> str:
     k = (key or "").lower()
     if "strong_buy" in k or "strongbuy" in k:
-        return ("🟢", "STRONG BUY",  "#34d399")
+        return ("🟢", "STRONG BUY",  "#30d158")
     elif "buy" in k:
         return ("🟢", "BUY",         "#86efac")
     elif "hold" in k or "neutral" in k:
-        return ("🟡", "HOLD",        "#fbbf24")
+        return ("🟡", "HOLD",        "#ffd60a")
     elif "underperform" in k:
         return ("🔴", "UNDERPERFORM","#fb923c")
     elif "sell" in k:
-        return ("🔴", "SELL",        "#f87171")
-    return ("⚪", "—", "#6b7280")
+        return ("🔴", "SELL",        "#ff453a")
+    return ("⚪", "—", "#8e8e93")
 
 
 def _score_color(s: int) -> str:
-    if s >= 70: return "#34d399"
-    if s >= 50: return "#fbbf24"
-    return "#f87171"
+    if s >= 70: return "#30d158"
+    if s >= 50: return "#ffd60a"
+    return "#ff453a"
 
 
 def _render_candidate_card(d: dict, idx: int) -> None:
     """Renderiza una tarjeta de candidato con análisis completo."""
     is_selected = st.session_state.get("discovery_selected", set())
     selected    = d["ticker"] in is_selected
-    border_c    = "#34d399" if selected else "rgba(255,255,255,0.07)"
+    border_c    = "#30d158" if selected else "rgba(255,255,255,0.07)"
     score_c     = _score_color(d["score_total"])
     emoji_k, label_k, color_k = _analyst_badge(d.get("analyst_key",""))
-    chg_color   = "#34d399" if d["change_1d"] >= 0 else "#f87171"
+    chg_color   = "#30d158" if d["change_1d"] >= 0 else "#ff453a"
     chg_sign    = "▲" if d["change_1d"] >= 0 else "▼"
 
     st.markdown(f"""
@@ -5054,10 +5073,10 @@ def _render_candidate_card(d: dict, idx: int) -> None:
                        font-family:'DM Mono',monospace; letter-spacing:-0.5px;">
             {d['ticker']}
           </span>
-          <span style="font-size:0.8rem; color:#9ca3af; margin-left:10px;">
+          <span style="font-size:0.8rem; color:#aeaeb2; margin-left:10px;">
             {d['name'][:35]}{"…" if len(d['name'])>35 else ""}
           </span><br>
-          <span style="font-size:0.75rem; color:#6b7280;">{d['sector']} · {d['industry'][:30]}</span>
+          <span style="font-size:0.75rem; color:#8e8e93;">{d['sector']} · {d['industry'][:30]}</span>
         </div>
         <div style="text-align:right;">
           <div style="font-size:1.3rem; font-weight:700; color:#fff;
@@ -5073,28 +5092,28 @@ def _render_candidate_card(d: dict, idx: int) -> None:
                   margin-bottom:16px;">
         <div style="background:rgba(255,255,255,0.04); border-radius:10px;
                     padding:8px 10px; text-align:center;">
-          <div style="font-size:0.65rem; color:#6b7280; text-transform:uppercase;
+          <div style="font-size:0.65rem; color:#8e8e93; text-transform:uppercase;
                       font-family:'DM Mono',monospace; margin-bottom:3px;">Score Total</div>
           <div style="font-size:1.4rem; font-weight:800; color:{score_c};
                       font-family:'DM Mono',monospace;">{d['score_total']}</div>
         </div>
         <div style="background:rgba(255,255,255,0.04); border-radius:10px;
                     padding:8px 10px; text-align:center;">
-          <div style="font-size:0.65rem; color:#6b7280; text-transform:uppercase;
+          <div style="font-size:0.65rem; color:#8e8e93; text-transform:uppercase;
                       font-family:'DM Mono',monospace; margin-bottom:3px;">Fundamental</div>
           <div style="font-size:1.2rem; font-weight:700; color:{_score_color(d['score_fund'])};
                       font-family:'DM Mono',monospace;">{d['score_fund']}</div>
         </div>
         <div style="background:rgba(255,255,255,0.04); border-radius:10px;
                     padding:8px 10px; text-align:center;">
-          <div style="font-size:0.65rem; color:#6b7280; text-transform:uppercase;
+          <div style="font-size:0.65rem; color:#8e8e93; text-transform:uppercase;
                       font-family:'DM Mono',monospace; margin-bottom:3px;">Analistas</div>
           <div style="font-size:1.2rem; font-weight:700; color:{_score_color(d['score_analyst'])};
                       font-family:'DM Mono',monospace;">{d['score_analyst']}</div>
         </div>
         <div style="background:rgba(255,255,255,0.04); border-radius:10px;
                     padding:8px 10px; text-align:center;">
-          <div style="font-size:0.65rem; color:#6b7280; text-transform:uppercase;
+          <div style="font-size:0.65rem; color:#8e8e93; text-transform:uppercase;
                       font-family:'DM Mono',monospace; margin-bottom:3px;">Histórico</div>
           <div style="font-size:1.2rem; font-weight:700; color:{_score_color(d['score_hist'])};
                       font-family:'DM Mono',monospace;">{d['score_hist']}</div>
@@ -5156,11 +5175,11 @@ def _render_candidate_card(d: dict, idx: int) -> None:
                 sell_w = 100 - buy_w - hold_w
                 st.markdown(
                     f'<div style="display:flex; height:10px; border-radius:5px; overflow:hidden; margin-top:8px;">'
-                    f'<div style="width:{buy_w}%;  background:#34d399;"></div>'
-                    f'<div style="width:{hold_w}%; background:#fbbf24;"></div>'
-                    f'<div style="width:{sell_w}%; background:#f87171;"></div>'
+                    f'<div style="width:{buy_w}%;  background:#30d158;"></div>'
+                    f'<div style="width:{hold_w}%; background:#ffd60a;"></div>'
+                    f'<div style="width:{sell_w}%; background:#ff453a;"></div>'
                     f'</div>'
-                    f'<div style="font-size:0.72rem; color:#6b7280; margin-top:4px; font-family:var(--mono);">'
+                    f'<div style="font-size:0.72rem; color:#8e8e93; margin-top:4px; font-family:var(--mono);">'
                     f'🟢 {d["buy"]} compra &nbsp; 🟡 {d["hold"]} mantener &nbsp; 🔴 {d["sell"]} vender'
                     f'</div>', unsafe_allow_html=True
                 )
@@ -5182,7 +5201,7 @@ def _render_candidate_card(d: dict, idx: int) -> None:
             st.markdown("**📈 Rendimiento Histórico**")
             def _ret_badge(v):
                 if v is None: return "—"
-                c = "#34d399" if v > 0 else "#f87171"
+                c = "#30d158" if v > 0 else "#ff453a"
                 return f'<span style="color:{c}; font-family:var(--mono);">{v:+.1f}%</span>'
 
             st.markdown(
@@ -5193,7 +5212,7 @@ def _render_candidate_card(d: dict, idx: int) -> None:
                 f"- **Volatilidad 1A**: `{d['vol_1y'] or '—'}%`<br>"
                 f"- **Sharpe 1A**: `{d['sharpe_1y'] or '—'}`<br>"
                 f"- **Max Drawdown**: "
-                + (f'<span style="color:#f87171;font-family:var(--mono);">'
+                + (f'<span style="color:#ff453a;font-family:var(--mono);">'
                    f'{d["max_dd_1y"]}%</span>' if d["max_dd_1y"] is not None else "—"),
                 unsafe_allow_html=True,
             )
@@ -5375,9 +5394,9 @@ def _render_discovery_tab() -> None:
                 section("ACTIVOS SELECCIONADOS")
                 st.markdown(
                     " &nbsp; ".join(
-                        f'<span style="background:rgba(79,142,247,0.15); border:1px solid '
-                        f'rgba(79,142,247,0.4); border-radius:20px; padding:4px 14px; '
-                        f'font-family:var(--mono); font-weight:700; color:#4f8ef7;">{t}</span>'
+                        f'<span style="background:rgba(10,132,255,0.15); border:1px solid '
+                        f'rgba(10,132,255,0.4); border-radius:20px; padding:4px 14px; '
+                        f'font-family:var(--mono); font-weight:700; color:#0a84ff;">{t}</span>'
                         for t in sorted(sel_set)
                     ),
                     unsafe_allow_html=True,
@@ -5469,8 +5488,8 @@ def tab_performance() -> None:
         if first_txn_date:
             days_since = (date.today() - first_txn_date).days
             st.markdown(
-                f"<div style='font-family:var(--mono);font-size:0.82rem;color:#9ca3af;padding-top:28px;'>"
-                f"Primera compra: <b style='color:#e5e7eb'>{first_txn_date}</b>"
+                f"<div style='font-family:var(--mono);font-size:0.82rem;color:#aeaeb2;padding-top:28px;'>"
+                f"Primera compra: <b style='color:#ffffff'>{first_txn_date}</b>"
                 f"&nbsp;·&nbsp;{days_since} días</div>",
                 unsafe_allow_html=True,
             )
@@ -5576,13 +5595,13 @@ def tab_performance() -> None:
         port_ann    = port_metrics.get("Retorno Anualizado", 0)
         ann_label   = "Retorno Anual*" if ann_est_port else "Retorno Anual"
         with k_cols[0]:
-            color = "#34d399" if port_period >= 0 else "#f87171"
+            color = "#30d158" if port_period >= 0 else "#ff453a"
             kpi_card("Retorno Período", f"{port_period:.1%}", accent=color)
         with k_cols[1]:
-            color = "#34d399" if port_metrics.get("Sharpe Ratio", 0) > 0 else "#f87171"
+            color = "#30d158" if port_metrics.get("Sharpe Ratio", 0) > 0 else "#ff453a"
             kpi_card("Sharpe", f"{port_metrics.get('Sharpe Ratio', 0):.2f}", accent=color)
         with k_cols[2]:
-            color = "#f87171" if port_metrics.get("Max Drawdown", 0) < 0 else "#34d399"
+            color = "#ff453a" if port_metrics.get("Max Drawdown", 0) < 0 else "#30d158"
             kpi_card("Max DD", f"{port_metrics.get('Max Drawdown', 0):.1%}", accent=color)
         if ann_est_port:
             st.caption(f"\\* Retorno anualizado proyectado: **{port_ann:.1%}** "
@@ -5597,13 +5616,13 @@ def tab_performance() -> None:
         bench_ann    = bench_metrics.get("Retorno Anualizado", 0)
         bench_est    = bench_metrics.get("Retorno Anual Est", False)
         with k_cols2[0]:
-            color = "#34d399" if bench_period >= 0 else "#f87171"
+            color = "#30d158" if bench_period >= 0 else "#ff453a"
             kpi_card("Retorno Período", f"{bench_period:.1%}", accent=color)
         with k_cols2[1]:
-            color = "#34d399" if bench_metrics.get("Sharpe Ratio", 0) > 0 else "#f87171"
+            color = "#30d158" if bench_metrics.get("Sharpe Ratio", 0) > 0 else "#ff453a"
             kpi_card("Sharpe", f"{bench_metrics.get('Sharpe Ratio', 0):.2f}", accent=color)
         with k_cols2[2]:
-            color = "#f87171" if bench_metrics.get("Max Drawdown", 0) < 0 else "#34d399"
+            color = "#ff453a" if bench_metrics.get("Max Drawdown", 0) < 0 else "#30d158"
             kpi_card("Max DD", f"{bench_metrics.get('Max Drawdown', 0):.1%}", accent=color)
         st.caption(f"Retorno anualizado: **{bench_ann:.1%}**")
 
@@ -5621,14 +5640,14 @@ def tab_performance() -> None:
     fig_perf.add_trace(go.Scatter(
         x=twr_aligned.index, y=twr_aligned.values,
         name="Tu Portafolio (TWR)",
-        line=dict(color="#4f8ef7", width=2.5),
+        line=dict(color="#0a84ff", width=2.5),
         hovertemplate="%{y:.1f}<extra>Portafolio TWR</extra>",
     ))
     # Curva secundaria: NAV real (visible solo si el usuario la activa)
     fig_perf.add_trace(go.Scatter(
         x=eq_norm.index, y=eq_norm.values,
         name="NAV Real (con aportaciones)",
-        line=dict(color="#4f8ef7", width=1.2, dash="dot"),
+        line=dict(color="#0a84ff", width=1.2, dash="dot"),
         opacity=0.45,
         visible="legendonly",   # oculta por defecto, activar desde la leyenda
         hovertemplate="%{y:.1f}<extra>NAV Real</extra>",
@@ -5637,11 +5656,11 @@ def tab_performance() -> None:
         fig_perf.add_trace(go.Scatter(
             x=bench_norm.index, y=bench_norm.values,
             name=bench,
-            line=dict(color="#6b7280", width=1.5, dash="dash"),
+            line=dict(color="#8e8e93", width=1.5, dash="dash"),
             hovertemplate="%{y:.1f}<extra>" + bench + "</extra>",
         ))
     # Extra benchmarks
-    _extra_colors = ["#fbbf24","#a78bfa","#fb923c","#38bdf8","#f472b6"]
+    _extra_colors = ["#ffd60a","#a78bfa","#fb923c","#38bdf8","#f472b6"]
     for _ei, _eb in enumerate(extra_benches):
         if _eb in prices_df.columns:
             _eb_s = prices_df[_eb].dropna()
@@ -5659,7 +5678,7 @@ def tab_performance() -> None:
         **PLOTLY_LAYOUT["xaxis"],
         "rangeselector": dict(
             bgcolor="#16161f",
-            font_color="#9ca3af",
+            font_color="#aeaeb2",
             buttons=[
                 dict(count=1, label="1M", step="month", stepmode="backward"),
                 dict(count=6, label="6M", step="month", stepmode="backward"),
@@ -5690,28 +5709,28 @@ def tab_performance() -> None:
 
     fig_dd = go.Figure()
     # Severity zones
-    fig_dd.add_hrect(y0=-10, y1=0,   fillcolor="rgba(248,113,113,0.04)", line_width=0)
-    fig_dd.add_hrect(y0=-20, y1=-10, fillcolor="rgba(248,113,113,0.08)", line_width=0)
-    fig_dd.add_hrect(y0=-100,y1=-20, fillcolor="rgba(248,113,113,0.13)", line_width=0)
+    fig_dd.add_hrect(y0=-10, y1=0,   fillcolor="rgba(255,69,58,0.04)", line_width=0)
+    fig_dd.add_hrect(y0=-20, y1=-10, fillcolor="rgba(255,69,58,0.08)", line_width=0)
+    fig_dd.add_hrect(y0=-100,y1=-20, fillcolor="rgba(255,69,58,0.13)", line_width=0)
     # Severity labels
     for lvl, lbl in [(-5,"Leve"),(-15,"Moderado"),(-30,"Severo")]:
         fig_dd.add_annotation(x=dd.index[min(5,len(dd)-1)], y=lvl,
             text=lbl, showarrow=False,
-            font=dict(size=9, color="rgba(248,113,113,0.4)", family="DM Mono"),
+            font=dict(size=9, color="rgba(255,69,58,0.4)", family="DM Mono"),
             xanchor="left")
     # Benchmark line
     if not bench_dd_series.empty:
         fig_dd.add_trace(go.Scatter(
             x=bench_dd_series.index, y=bench_dd_series.values,
-            name=bench, line=dict(color="#6b7280", width=1.2, dash="dot"),
+            name=bench, line=dict(color="#8e8e93", width=1.2, dash="dot"),
             hovertemplate="%{y:.1f}%<extra>" + bench + "</extra>",
         ))
     # Portfolio fill
     fig_dd.add_trace(go.Scatter(
         x=dd.index, y=dd.values,
         fill="tozeroy", name="Portafolio",
-        line=dict(color="#f87171", width=2),
-        fillcolor="rgba(248,113,113,0.18)",
+        line=dict(color="#ff453a", width=2),
+        fillcolor="rgba(255,69,58,0.18)",
         hovertemplate="%{y:.2f}%<extra>Drawdown</extra>",
     ))
     # Max DD marker
@@ -5719,9 +5738,9 @@ def tab_performance() -> None:
         fig_dd.add_annotation(
             x=max_dd_date, y=max_dd_val,
             text=f"Máx DD<br>{max_dd_val:.1f}%",
-            showarrow=True, arrowhead=2, arrowcolor="#f87171", arrowsize=0.8,
-            font=dict(size=10, color="#f87171", family="DM Mono"),
-            bgcolor="rgba(10,10,15,0.85)", bordercolor="#f87171",
+            showarrow=True, arrowhead=2, arrowcolor="#ff453a", arrowsize=0.8,
+            font=dict(size=10, color="#ff453a", family="DM Mono"),
+            bgcolor="rgba(10,10,15,0.85)", bordercolor="#ff453a",
             borderwidth=1, borderpad=4, ax=30, ay=-30,
         )
     fig_dd.update_layout(
@@ -5731,11 +5750,11 @@ def tab_performance() -> None:
 
     # Stats row
     _in_dd = curr_dd_val < -0.5
-    _dd_clr = "#f87171" if _in_dd else "#34d399"
+    _dd_clr = "#ff453a" if _in_dd else "#30d158"
     st.markdown(
         f"<div style='display:flex;gap:32px;font-family:DM Mono,monospace;"
-        f"font-size:0.82rem;color:#6b7280;margin-top:-8px;margin-bottom:16px;'>"
-        f"<span>Máx Drawdown: <b style='color:#f87171;'>{max_dd_val:.2f}%</b></span>"
+        f"font-size:0.82rem;color:#8e8e93;margin-top:-8px;margin-bottom:16px;'>"
+        f"<span>Máx Drawdown: <b style='color:#ff453a;'>{max_dd_val:.2f}%</b></span>"
         f"<span>DD actual: <b style='color:{_dd_clr};'>{curr_dd_val:.2f}%</b></span>"
         f"<span>{'⚠️ En drawdown' if _in_dd else '✓ En máximos'}</span>"
         f"</div>", unsafe_allow_html=True)
@@ -5916,7 +5935,7 @@ def tab_analytics() -> None:
         }
         _port_r = sum(returns_df[t].fillna(0) * w for t, w in _w_an.items())
         _sharpe_fig = go.Figure()
-        _sharpe_colors = {"30D": "#4f8ef7", "60D": "#34d399", "90D": "#fbbf24"}
+        _sharpe_colors = {"30D": "#0a84ff", "60D": "#30d158", "90D": "#ffd60a"}
         _sharpe_windows = {"30D": 30, "60D": 60, "90D": 90}
         for _lbl, _win in _sharpe_windows.items():
             if len(_port_r) < _win + 5:
@@ -5931,12 +5950,12 @@ def tab_analytics() -> None:
                 hovertemplate=f"<b>{_lbl}</b>: %{{y:.2f}}<extra></extra>",
             ))
         _sharpe_fig.add_hline(y=0, line_color="rgba(255,255,255,0.15)", line_dash="dash")
-        _sharpe_fig.add_hline(y=1, line_color="rgba(52,211,153,0.3)", line_dash="dot",
+        _sharpe_fig.add_hline(y=1, line_color="rgba(48,209,88,0.3)", line_dash="dot",
                               annotation_text="Sharpe = 1",
-                              annotation_font=dict(size=9, color="#34d399", family="DM Mono"),
+                              annotation_font=dict(size=9, color="#30d158", family="DM Mono"),
                               annotation_position="bottom right")
-        _sharpe_fig.add_hrect(y0=0, y1=50,   fillcolor="rgba(52,211,153,0.03)", line_width=0)
-        _sharpe_fig.add_hrect(y0=-50, y1=0,  fillcolor="rgba(248,113,113,0.03)", line_width=0)
+        _sharpe_fig.add_hrect(y0=0, y1=50,   fillcolor="rgba(48,209,88,0.03)", line_width=0)
+        _sharpe_fig.add_hrect(y0=-50, y1=0,  fillcolor="rgba(255,69,58,0.03)", line_width=0)
         _sharpe_fig.update_layout(**PLOTLY_LAYOUT, height=300,
                                   yaxis_title="Sharpe (anualizado rolling)")
         st.plotly_chart(_sharpe_fig, use_container_width=True, config=PLOTLY_CONFIG)
@@ -5967,36 +5986,36 @@ def tab_analytics() -> None:
             # Bollinger fill
             _fig_bb.add_trace(go.Scatter(
                 x=_bb_up.index, y=_bb_up.values, name="Banda Sup.",
-                line=dict(color="rgba(79,142,247,0.35)", width=1, dash="dot"),
+                line=dict(color="rgba(10,132,255,0.35)", width=1, dash="dot"),
                 showlegend=False), row=1, col=1)
             _fig_bb.add_trace(go.Scatter(
                 x=_bb_lo.index, y=_bb_lo.values, name="Banda Inf.",
-                fill="tonexty", fillcolor="rgba(79,142,247,0.07)",
-                line=dict(color="rgba(79,142,247,0.35)", width=1, dash="dot"),
+                fill="tonexty", fillcolor="rgba(10,132,255,0.07)",
+                line=dict(color="rgba(10,132,255,0.35)", width=1, dash="dot"),
                 showlegend=False), row=1, col=1)
             _fig_bb.add_trace(go.Scatter(
                 x=_sma20.index, y=_sma20.values, name="SMA 20",
-                line=dict(color="rgba(251,191,36,0.7)", width=1.5, dash="dash")),
+                line=dict(color="rgba(255,214,10,0.7)", width=1.5, dash="dash")),
                 row=1, col=1)
             _fig_bb.add_trace(go.Scatter(
                 x=_ps.index, y=_ps.values, name=_sel,
-                line=dict(color="#4f8ef7", width=2),
+                line=dict(color="#0a84ff", width=2),
                 hovertemplate=f"<b>{_sel}</b> $%{{y:,.2f}}<extra></extra>"),
                 row=1, col=1)
             # RSI
-            _fig_bb.add_hrect(y0=70, y1=100, fillcolor="rgba(248,113,113,0.07)",
+            _fig_bb.add_hrect(y0=70, y1=100, fillcolor="rgba(255,69,58,0.07)",
                                line_width=0, row=2, col=1)
-            _fig_bb.add_hrect(y0=0,  y1=30,  fillcolor="rgba(52,211,153,0.07)",
+            _fig_bb.add_hrect(y0=0,  y1=30,  fillcolor="rgba(48,209,88,0.07)",
                                line_width=0, row=2, col=1)
-            _fig_bb.add_hline(y=70, line_color="rgba(248,113,113,0.45)",
+            _fig_bb.add_hline(y=70, line_color="rgba(255,69,58,0.45)",
                                line_dash="dot", row=2, col=1,
                                annotation_text="Sobrecompra",
-                               annotation_font=dict(size=9,color="#f87171",family="DM Mono"),
+                               annotation_font=dict(size=9,color="#ff453a",family="DM Mono"),
                                annotation_position="right")
-            _fig_bb.add_hline(y=30, line_color="rgba(52,211,153,0.45)",
+            _fig_bb.add_hline(y=30, line_color="rgba(48,209,88,0.45)",
                                line_dash="dot", row=2, col=1,
                                annotation_text="Sobreventa",
-                               annotation_font=dict(size=9,color="#34d399",family="DM Mono"),
+                               annotation_font=dict(size=9,color="#30d158",family="DM Mono"),
                                annotation_position="right")
             _fig_bb.add_trace(go.Scatter(
                 x=_rsi14.index, y=_rsi14.values, name="RSI 14",
@@ -6005,7 +6024,7 @@ def tab_analytics() -> None:
                 row=2, col=1)
             _fig_bb.update_layout(**PLOTLY_LAYOUT, height=520)
             _fig_bb.update_layout(legend=dict(orientation="h", y=1.04, x=0,
-                                              font=dict(size=10, color="#6b7280"),
+                                              font=dict(size=10, color="#8e8e93"),
                                               bgcolor="rgba(0,0,0,0)"))
             _fig_bb.update_yaxes(title_text=f"Precio {_sel}", row=1, col=1,
                                   showgrid=True, gridcolor="rgba(255,255,255,0.04)")
@@ -6017,11 +6036,11 @@ def tab_analytics() -> None:
             # RSI actual
             _rsi_now = float(_rsi14.dropna().iloc[-1]) if not _rsi14.dropna().empty else None
             if _rsi_now is not None:
-                _rc = "#f87171" if _rsi_now>70 else ("#34d399" if _rsi_now<30 else "#9ca3af")
+                _rc = "#ff453a" if _rsi_now>70 else ("#30d158" if _rsi_now<30 else "#aeaeb2")
                 _rl = "Sobrecompra ↑" if _rsi_now>70 else ("Sobreventa ↓" if _rsi_now<30 else "Neutral")
                 st.markdown(
                     f"<div style='font-family:DM Mono,monospace;font-size:0.82rem;"
-                    f"color:#6b7280;margin-top:-8px;margin-bottom:12px;'>"
+                    f"color:#8e8e93;margin-top:-8px;margin-bottom:12px;'>"
                     f"RSI actual <b style='color:{_rc};'>{_rsi_now:.1f}</b>"
                     f" — <span style='color:{_rc};'>{_rl}</span></div>",
                     unsafe_allow_html=True)
@@ -6034,7 +6053,7 @@ def tab_analytics() -> None:
         _n = len(corr_cols)
         _z = corr.values.tolist()
         _txt = [[f"{corr.iloc[i,j]:.2f}" for j in range(_n)] for i in range(_n)]
-        _tclr = [["#ffffff" if abs(corr.iloc[i,j]) > 0.3 else "#9ca3af"
+        _tclr = [["#ffffff" if abs(corr.iloc[i,j]) > 0.3 else "#aeaeb2"
                   for j in range(_n)] for i in range(_n)]
         fig_corr = go.Figure(go.Heatmap(
             z=_z,
@@ -6056,11 +6075,11 @@ def tab_analytics() -> None:
             hovertemplate="<b>%{x} — %{y}</b><br>Correlación: %{z:.3f}<extra></extra>",
             showscale=True,
             colorbar=dict(
-                title=dict(text="Correlación", font=dict(size=10, color="#6b7280"),
+                title=dict(text="Correlación", font=dict(size=10, color="#8e8e93"),
                            side="right"),
                 tickvals=[-1, -0.5, 0, 0.5, 1],
                 ticktext=["-1.0", "-0.5", "0", "+0.5", "+1.0"],
-                tickfont=dict(size=9, color="#6b7280", family="DM Mono"),
+                tickfont=dict(size=9, color="#8e8e93", family="DM Mono"),
                 thickness=12,
                 len=0.9,
                 bgcolor="rgba(0,0,0,0)",
@@ -6068,9 +6087,9 @@ def tab_analytics() -> None:
             ),
         ))
         fig_corr.update_layout(**PLOTLY_LAYOUT, height=max(340, _n * 56 + 100))
-        fig_corr.update_xaxes(tickfont=dict(size=11, color="#9ca3af", family="DM Mono"),
+        fig_corr.update_xaxes(tickfont=dict(size=11, color="#aeaeb2", family="DM Mono"),
                               side="bottom", showgrid=False)
-        fig_corr.update_yaxes(tickfont=dict(size=11, color="#9ca3af", family="DM Mono"),
+        fig_corr.update_yaxes(tickfont=dict(size=11, color="#aeaeb2", family="DM Mono"),
                               showgrid=False, autorange="reversed")
         st.plotly_chart(fig_corr, use_container_width=True, config=PLOTLY_CONFIG)
 
@@ -6081,13 +6100,13 @@ def tab_analytics() -> None:
             _top  = max(_pairs, key=lambda x: abs(x[2]))
             _div  = min(_pairs, key=lambda x: x[2])
             st.markdown(
-                f"<div style='font-size:0.76rem;color:#6b7280;font-family:DM Mono,"
+                f"<div style='font-size:0.76rem;color:#8e8e93;font-family:DM Mono,"
                 f"monospace;margin-top:-10px;margin-bottom:16px;line-height:1.7;'>"
                 f"Par más correlacionado: "
-                f"<span style='color:#4f8ef7;font-weight:700;'>{_top[0]} / {_top[1]}</span>"
+                f"<span style='color:#0a84ff;font-weight:700;'>{_top[0]} / {_top[1]}</span>"
                 f" ({_top[2]:+.2f})&nbsp;&nbsp;·&nbsp;&nbsp;"
                 f"Mayor diversificador: "
-                f"<span style='color:#34d399;font-weight:700;'>{_div[0]} / {_div[1]}</span>"
+                f"<span style='color:#30d158;font-weight:700;'>{_div[0]} / {_div[1]}</span>"
                 f" ({_div[2]:+.2f})"
                 f"</div>",
                 unsafe_allow_html=True
@@ -6141,11 +6160,11 @@ def tab_analytics() -> None:
             fig_rc = go.Figure()
             fig_rc.add_trace(go.Bar(
                 x=df_rc["Ticker"], y=df_rc["Peso"],
-                name="Peso Actual", marker_color="#4f8ef7",
+                name="Peso Actual", marker_color="#0a84ff",
             ))
             fig_rc.add_trace(go.Bar(
                 x=df_rc["Ticker"], y=df_rc["Contribución %"],
-                name="Aporte al Riesgo", marker_color="#f87171",
+                name="Aporte al Riesgo", marker_color="#ff453a",
             ))
             fig_rc.update_layout(
                 **PLOTLY_LAYOUT,
@@ -6208,19 +6227,19 @@ def tab_analytics() -> None:
         _fig_dca = go.Figure()
         _fig_dca.add_trace(go.Scatter(
             x=_t_ax, y=_p90, name="Optimista (P90)",
-            line=dict(color="rgba(52,211,153,0.4)", width=1, dash="dot"),
+            line=dict(color="rgba(48,209,88,0.4)", width=1, dash="dot"),
             showlegend=True))
         _fig_dca.add_trace(go.Scatter(
             x=_t_ax, y=_p10, name="Pesimista (P10)",
-            fill="tonexty", fillcolor="rgba(79,142,247,0.07)",
-            line=dict(color="rgba(248,113,113,0.4)", width=1, dash="dot"),
+            fill="tonexty", fillcolor="rgba(10,132,255,0.07)",
+            line=dict(color="rgba(255,69,58,0.4)", width=1, dash="dot"),
             showlegend=True))
         _fig_dca.add_trace(go.Scatter(
             x=_t_ax, y=_p50, name="Mediana (P50)",
-            line=dict(color="#4f8ef7", width=2.5)))
+            line=dict(color="#0a84ff", width=2.5)))
         _fig_dca.add_trace(go.Scatter(
             x=_t_ax, y=_invested, name="Capital aportado",
-            line=dict(color="#6b7280", width=1.5, dash="dash")))
+            line=dict(color="#8e8e93", width=1.5, dash="dash")))
         _fig_dca.update_layout(
             **PLOTLY_LAYOUT, height=360,
             xaxis_title="Años", yaxis_title="Valor portafolio ($)",
@@ -6234,10 +6253,10 @@ def tab_analytics() -> None:
         _tot_in = _nav_now + _dca_amt * _total_periods
         st.markdown(
             f"<div style='display:flex;gap:28px;font-family:DM Mono,monospace;"
-            f"font-size:0.82rem;color:#6b7280;margin-top:-8px;'>"
-            f"<span>Capital total aportado: <b style='color:#e5e7eb;'>${_tot_in:,.0f}</b></span>"
-            f"<span>Mediana a {_dca_years}A: <b style='color:#4f8ef7;'>${_v50_f:,.0f}</b></span>"
-            f"<span>Rango P10–P90: <b style='color:#34d399;'>${_v10_f:,.0f} – ${_v90_f:,.0f}</b></span>"
+            f"font-size:0.82rem;color:#8e8e93;margin-top:-8px;'>"
+            f"<span>Capital total aportado: <b style='color:#ffffff;'>${_tot_in:,.0f}</b></span>"
+            f"<span>Mediana a {_dca_years}A: <b style='color:#0a84ff;'>${_v50_f:,.0f}</b></span>"
+            f"<span>Rango P10–P90: <b style='color:#30d158;'>${_v10_f:,.0f} – ${_v90_f:,.0f}</b></span>"
             f"</div>", unsafe_allow_html=True)
 
     # ── Noticias por ticker ───────────────────────────────────
@@ -6262,8 +6281,8 @@ def tab_analytics() -> None:
         with _news_cols[_ni % len(_news_cols)]:
             st.markdown(
                 f"<div style='font-family:DM Mono,monospace;font-weight:800;"
-                f"font-size:0.82rem;color:#4f8ef7;margin-bottom:8px;"
-                f"padding:4px 10px;background:rgba(79,142,247,.08);"
+                f"font-size:0.82rem;color:#0a84ff;margin-bottom:8px;"
+                f"padding:4px 10px;background:rgba(10,132,255,.08);"
                 f"border-radius:6px;display:inline-block;'>{_nt}</div>",
                 unsafe_allow_html=True)
             _arts = _news_data.get(_nt, [])
@@ -6291,10 +6310,10 @@ def tab_analytics() -> None:
                         f"<div style='margin-bottom:10px;padding:8px 10px;"
                         f"background:rgba(255,255,255,0.025);border-radius:8px;"
                         f"border:1px solid rgba(255,255,255,0.05);'>"
-                        f"<a href='{_link}' target='_blank' style='color:#e5e7eb;"
+                        f"<a href='{_link}' target='_blank' style='color:#ffffff;"
                         f"font-size:0.78rem;text-decoration:none;line-height:1.4;"
                         f"display:block;'>{_title}</a>"
-                        f"<div style='font-size:0.65rem;color:#4b5563;"
+                        f"<div style='font-size:0.65rem;color:#636366;"
                         f"font-family:DM Mono,monospace;margin-top:4px;'>"
                         f"{_pub} · {_fecha}</div>"
                         f"</div>",
@@ -6699,14 +6718,14 @@ def tab_stock_deep_dive() -> None:
     pl_usd   = (d["price"] - avg_cost) * shares
     pl_pct   = (d["price"] - avg_cost) / avg_cost if avg_cost > 0 else 0.0
     pos_val  = d["price"] * shares
-    chg_color = "#34d399" if d["change_1d"] >= 0 else "#f87171"
-    pl_color  = "#34d399" if pl_pct >= 0 else "#f87171"
+    chg_color = "#30d158" if d["change_1d"] >= 0 else "#ff453a"
+    pl_color  = "#30d158" if pl_pct >= 0 else "#ff453a"
 
     # ══════════════════════════════════════════════════════════
     # HEADER: nombre, precio, posición
     # ══════════════════════════════════════════════════════════
     st.markdown(f"""
-    <div style="background:linear-gradient(135deg,rgba(79,142,247,0.08),rgba(52,211,153,0.06));
+    <div style="background:linear-gradient(135deg,rgba(10,132,255,0.08),rgba(48,209,88,0.06));
                 border:1px solid rgba(255,255,255,0.08); border-radius:20px;
                 padding:24px 28px; margin-bottom:20px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
@@ -6715,8 +6734,8 @@ def tab_stock_deep_dive() -> None:
                       font-family:'DM Mono',monospace; letter-spacing:-1px;">
             {selected}
           </div>
-          <div style="font-size:1rem; color:#9ca3af; margin-top:2px;">{d['name']}</div>
-          <div style="font-size:0.8rem; color:#6b7280; margin-top:4px;">
+          <div style="font-size:1rem; color:#aeaeb2; margin-top:2px;">{d['name']}</div>
+          <div style="font-size:0.8rem; color:#8e8e93; margin-top:4px;">
             {d['sector']} · {d['industry']} · {d.get('country','—')}
           </div>
         </div>
@@ -6743,7 +6762,7 @@ def tab_stock_deep_dive() -> None:
         up = d.get("upside")
         kpi_card("Upside Analistas",
                  f"{up:+.1%}" if up is not None else "—",
-                 accent="#34d399" if up and up>0 else "#f87171")
+                 accent="#30d158" if up and up>0 else "#ff453a")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -6782,25 +6801,25 @@ def tab_stock_deep_dive() -> None:
             x=h.index, open=h["Open"], high=h["High"],
             low=h["Low"], close=h["Close"],
             name="Precio",
-            increasing_line_color="#34d399",
-            decreasing_line_color="#f87171",
-            increasing_fillcolor="rgba(52,211,153,0.6)",
-            decreasing_fillcolor="rgba(248,113,113,0.6)",
+            increasing_line_color="#30d158",
+            decreasing_line_color="#ff453a",
+            increasing_fillcolor="rgba(48,209,88,0.6)",
+            decreasing_fillcolor="rgba(255,69,58,0.6)",
         ), row=1, col=1)
 
         # Bollinger Bands
         fig.add_trace(go.Scatter(x=h.index, y=bb_up.reindex(h.index),
-                                  line=dict(color="rgba(251,191,36,0.4)", width=1, dash="dot"),
+                                  line=dict(color="rgba(255,214,10,0.4)", width=1, dash="dot"),
                                   name="BB Upper", showlegend=False), row=1, col=1)
         fig.add_trace(go.Scatter(x=h.index, y=bb_lo.reindex(h.index),
-                                  fill="tonexty", fillcolor="rgba(251,191,36,0.04)",
-                                  line=dict(color="rgba(251,191,36,0.4)", width=1, dash="dot"),
+                                  fill="tonexty", fillcolor="rgba(255,214,10,0.04)",
+                                  line=dict(color="rgba(255,214,10,0.4)", width=1, dash="dot"),
                                   name="Bollinger Bands"), row=1, col=1)
 
         # SMA lines
         if len(cl) >= 20:
             fig.add_trace(go.Scatter(x=h.index, y=sma20.reindex(h.index),
-                                      line=dict(color="#4f8ef7", width=1.5),
+                                      line=dict(color="#0a84ff", width=1.5),
                                       name="SMA 20"), row=1, col=1)
         if len(cl) >= 50:
             fig.add_trace(go.Scatter(x=h.index, y=sma50.reindex(h.index),
@@ -6810,7 +6829,7 @@ def tab_stock_deep_dive() -> None:
         # Costo promedio
         if avg_cost > 0:
             fig.add_hline(y=avg_cost, line_dash="dash",
-                          line_color="rgba(251,191,36,0.8)",
+                          line_color="rgba(255,214,10,0.8)",
                           annotation_text=f"Tu costo ${avg_cost:.2f}",
                           annotation_position="top left", row=1, col=1)
 
@@ -6823,9 +6842,9 @@ def tab_stock_deep_dive() -> None:
         fig.add_trace(go.Scatter(x=h.index, y=rsi_s.reindex(h.index),
                                   line=dict(color="#fb923c", width=2),
                                   name="RSI(14)"), row=2, col=1)
-        fig.add_hline(y=70, line_color="rgba(248,113,113,0.4)",
+        fig.add_hline(y=70, line_color="rgba(255,69,58,0.4)",
                       line_dash="dot", row=2, col=1)
-        fig.add_hline(y=30, line_color="rgba(52,211,153,0.4)",
+        fig.add_hline(y=30, line_color="rgba(48,209,88,0.4)",
                       line_dash="dot", row=2, col=1)
 
         # MACD
@@ -6835,16 +6854,16 @@ def tab_stock_deep_dive() -> None:
         signal_s = macd_s.ewm(span=9).mean()
         hist_s   = macd_s - signal_s
 
-        colors_macd = ["#34d399" if v >= 0 else "#f87171"
+        colors_macd = ["#30d158" if v >= 0 else "#ff453a"
                        for v in hist_s.reindex(h.index).fillna(0)]
         fig.add_trace(go.Bar(x=h.index, y=hist_s.reindex(h.index),
                              marker_color=colors_macd, name="MACD Hist",
                              showlegend=False), row=3, col=1)
         fig.add_trace(go.Scatter(x=h.index, y=macd_s.reindex(h.index),
-                                  line=dict(color="#4f8ef7", width=1.5),
+                                  line=dict(color="#0a84ff", width=1.5),
                                   name="MACD"), row=3, col=1)
         fig.add_trace(go.Scatter(x=h.index, y=signal_s.reindex(h.index),
-                                  line=dict(color="#f87171", width=1.5),
+                                  line=dict(color="#ff453a", width=1.5),
                                   name="Signal"), row=3, col=1)
 
         # Build layout without any keys we override, then merge overrides
@@ -6876,13 +6895,13 @@ def tab_stock_deep_dive() -> None:
             if val is None: return
             norm = (val - lo) / (hi - lo) if hi != lo else 0.5
             norm = max(0, min(1, norm))
-            c = "#34d399" if (norm > 0.6) == good_high else "#f87171"
-            if 0.4 <= norm <= 0.6: c = "#fbbf24"
+            c = "#30d158" if (norm > 0.6) == good_high else "#ff453a"
+            if 0.4 <= norm <= 0.6: c = "#ffd60a"
             st.markdown(
                 f"<div style='margin-bottom:10px;'>"
                 f"<div style='display:flex; justify-content:space-between; font-size:0.78rem;'>"
-                f"<span style='color:#9ca3af'>{label}</span>"
-                f"<span style='color:#e5e7eb; font-family:var(--mono)'>{val:{fmt}}</span></div>"
+                f"<span style='color:#aeaeb2'>{label}</span>"
+                f"<span style='color:#ffffff; font-family:var(--mono)'>{val:{fmt}}</span></div>"
                 f"<div style='background:rgba(255,255,255,0.05); border-radius:4px; height:6px; margin-top:3px;'>"
                 f"<div style='width:{norm*100:.0f}%; background:{c}; height:6px; border-radius:4px;'></div></div>"
                 f"</div>", unsafe_allow_html=True)
@@ -6893,38 +6912,38 @@ def tab_stock_deep_dive() -> None:
 
         st.markdown(f"""
         <div style='font-family:var(--mono); font-size:0.82rem; line-height:2.0;'>
-        <span style='color:#6b7280'>SMA 20</span>&emsp;
-        <span style='color:{"#34d399" if d.get("sma20") and price>d.get("sma20",0) else "#f87171"}'>
+        <span style='color:#8e8e93'>SMA 20</span>&emsp;
+        <span style='color:{"#30d158" if d.get("sma20") and price>d.get("sma20",0) else "#ff453a"}'>
         ${d.get("sma20",0):.2f} {"▲" if d.get("sma20") and price>d.get("sma20",0) else "▼"}</span><br>
-        <span style='color:#6b7280'>SMA 50</span>&emsp;
-        <span style='color:{"#34d399" if d.get("sma50") and price>d.get("sma50",0) else "#f87171"}'>
+        <span style='color:#8e8e93'>SMA 50</span>&emsp;
+        <span style='color:{"#30d158" if d.get("sma50") and price>d.get("sma50",0) else "#ff453a"}'>
         ${d.get("sma50",0) or 0:.2f} {"▲" if d.get("sma50") and price>d.get("sma50",0) else "▼"}</span><br>
-        <span style='color:#6b7280'>SMA 200</span>&emsp;
-        <span style='color:{"#34d399" if d.get("sma200") and price>d.get("sma200",0) else "#f87171"}'>
+        <span style='color:#8e8e93'>SMA 200</span>&emsp;
+        <span style='color:{"#30d158" if d.get("sma200") and price>d.get("sma200",0) else "#ff453a"}'>
         ${d.get("sma200",0) or 0:.2f} {"▲" if d.get("sma200") and price>d.get("sma200",0) else "▼"}</span><br>
-        <span style='color:#6b7280'>MACD hist</span>&emsp;
-        <span style='color:{"#34d399" if (d.get("macd_hist") or 0)>0 else "#f87171"}'>
+        <span style='color:#8e8e93'>MACD hist</span>&emsp;
+        <span style='color:{"#30d158" if (d.get("macd_hist") or 0)>0 else "#ff453a"}'>
         {d.get("macd_hist",0) or 0:+.3f}</span><br>
-        <span style='color:#6b7280'>52S Máx</span>&emsp;
-        <span style='color:#e5e7eb'>${d.get("wk52_high",0):.2f}
+        <span style='color:#8e8e93'>52S Máx</span>&emsp;
+        <span style='color:#ffffff'>${d.get("wk52_high",0):.2f}
         ({d.get("from_ath",0)*100:+.1f}%)</span><br>
-        <span style='color:#6b7280'>52S Mín</span>&emsp;
-        <span style='color:#e5e7eb'>${d.get("wk52_low",0):.2f}
+        <span style='color:#8e8e93'>52S Mín</span>&emsp;
+        <span style='color:#ffffff'>${d.get("wk52_low",0):.2f}
         ({d.get("from_atl",0)*100:+.1f}%)</span><br>
-        <span style='color:#6b7280'>Beta</span>&emsp;
-        <span style='color:#e5e7eb'>{d.get("beta") or "N/D"}</span>
+        <span style='color:#8e8e93'>Beta</span>&emsp;
+        <span style='color:#ffffff'>{d.get("beta") or "N/D"}</span>
         </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("<br><b style='color:#9ca3af; font-size:0.78rem;'>RETORNOS</b>", unsafe_allow_html=True)
+        st.markdown("<br><b style='color:#aeaeb2; font-size:0.78rem;'>RETORNOS</b>", unsafe_allow_html=True)
         for label, key in [("1 Semana","ret_1w"),("1 Mes","ret_1m"),
                             ("3 Meses","ret_3m"),("6 Meses","ret_6m"),("1 Año","ret_1y")]:
             v = d.get(key)
             if v is not None:
-                c = "#34d399" if v >= 0 else "#f87171"
+                c = "#30d158" if v >= 0 else "#ff453a"
                 st.markdown(
                     f"<span style='font-family:var(--mono);font-size:0.82rem;"
-                    f"color:#6b7280'>{label}</span>&emsp;"
+                    f"color:#8e8e93'>{label}</span>&emsp;"
                     f"<span style='color:{c};font-weight:700;font-family:var(--mono)'>"
                     f"{v:+.2%}</span><br>", unsafe_allow_html=True)
 
@@ -6932,10 +6951,10 @@ def tab_stock_deep_dive() -> None:
         section("FUNDAMENTAL")
         def _row(label, val, fmt=".2f", is_pct=False, good_high=True):
             if val is None: return
-            c = "#9ca3af"
+            c = "#aeaeb2"
             try:
                 if is_pct:
-                    c = "#34d399" if (val > 0) == good_high else "#f87171"
+                    c = "#30d158" if (val > 0) == good_high else "#ff453a"
                     disp = f"{val:.1%}"
                 else:
                     disp = f"{val:{fmt}}"
@@ -6945,7 +6964,7 @@ def tab_stock_deep_dive() -> None:
                 f"<div style='display:flex;justify-content:space-between;"
                 f"font-size:0.82rem;margin-bottom:6px;border-bottom:1px solid "
                 f"rgba(255,255,255,0.04);padding-bottom:6px;'>"
-                f"<span style='color:#6b7280'>{label}</span>"
+                f"<span style='color:#8e8e93'>{label}</span>"
                 f"<span style='color:{c};font-family:var(--mono);font-weight:600'>{disp}</span>"
                 f"</div>", unsafe_allow_html=True)
 
@@ -6956,33 +6975,33 @@ def tab_stock_deep_dive() -> None:
                 f"<div style='display:flex;justify-content:space-between;"
                 f"font-size:0.82rem;margin-bottom:6px;border-bottom:1px solid "
                 f"rgba(255,255,255,0.04);padding-bottom:6px;'>"
-                f"<span style='color:#6b7280'>{label}</span>"
-                f"<span style='color:#e5e7eb;font-family:var(--mono)'>{disp}</span>"
+                f"<span style='color:#8e8e93'>{label}</span>"
+                f"<span style='color:#ffffff;font-family:var(--mono)'>{disp}</span>"
                 f"</div>", unsafe_allow_html=True)
 
-        st.markdown("<span style='color:#6b7280;font-size:0.72rem;'>VALUACIÓN</span>", unsafe_allow_html=True)
+        st.markdown("<span style='color:#8e8e93;font-size:0.72rem;'>VALUACIÓN</span>", unsafe_allow_html=True)
         _row("P/E trailing",  d.get("pe"),         ".1f")
         _row("P/E forward",   d.get("forward_pe"), ".1f")
         _row("PEG",           d.get("peg"),         ".2f")
         _row("EV/EBITDA",     d.get("ev_ebitda"),  ".1f")
         _row("P/Book",        d.get("pb"),          ".2f")
         _row("P/Sales",       d.get("ps"),          ".2f")
-        st.markdown("<br><span style='color:#6b7280;font-size:0.72rem;'>RENTABILIDAD</span>", unsafe_allow_html=True)
+        st.markdown("<br><span style='color:#8e8e93;font-size:0.72rem;'>RENTABILIDAD</span>", unsafe_allow_html=True)
         _row("ROE",           d.get("roe"),          ".1%", True, True)
         _row("ROA",           d.get("roa"),          ".1%", True, True)
         _row("Margen Bruto",  d.get("gross_margin"), ".1%", True, True)
         _row("Margen Neto",   d.get("profit_margin"),".1%", True, True)
         _row("Margen Op.",    d.get("op_margin"),    ".1%", True, True)
-        st.markdown("<br><span style='color:#6b7280;font-size:0.72rem;'>CRECIMIENTO</span>", unsafe_allow_html=True)
+        st.markdown("<br><span style='color:#8e8e93;font-size:0.72rem;'>CRECIMIENTO</span>", unsafe_allow_html=True)
         _row("Crec. Ingresos",  d.get("rev_growth"),   ".1%", True, True)
         _row("Crec. Ganancias", d.get("earn_growth"),  ".1%", True, True)
         _row("Crec. Gan. QoQ",  d.get("earn_qgrowth"), ".1%", True, True)
-        st.markdown("<br><span style='color:#6b7280;font-size:0.72rem;'>SALUD FINANCIERA</span>", unsafe_allow_html=True)
+        st.markdown("<br><span style='color:#8e8e93;font-size:0.72rem;'>SALUD FINANCIERA</span>", unsafe_allow_html=True)
         _row("Deuda/Capital",   d.get("debt_equity"),   ".1f")
         _row("Current Ratio",   d.get("current_ratio"), ".2f")
         _row("Quick Ratio",     d.get("quick_ratio"),   ".2f")
         _row("Dividendo",       d.get("dividend_yield"),".2%", True, True)
-        st.markdown("<br><span style='color:#6b7280;font-size:0.72rem;'>TAMAÑO</span>", unsafe_allow_html=True)
+        st.markdown("<br><span style='color:#8e8e93;font-size:0.72rem;'>TAMAÑO</span>", unsafe_allow_html=True)
         for lbl, v in [("Market Cap",d.get("mktcap")),("EBITDA",d.get("ebitda")),
                        ("Revenue",d.get("revenue")),("FCF",d.get("fcf")),
                        ("Cash",d.get("cash")),("Deuda Total",d.get("total_debt"))]:
@@ -6991,8 +7010,8 @@ def tab_stock_deep_dive() -> None:
                     f"<div style='display:flex;justify-content:space-between;"
                     f"font-size:0.82rem;margin-bottom:6px;border-bottom:1px solid "
                     f"rgba(255,255,255,0.04);padding-bottom:6px;'>"
-                    f"<span style='color:#6b7280'>{lbl}</span>"
-                    f"<span style='color:#e5e7eb;font-family:var(--mono)'>{_fmt_big(v)}</span>"
+                    f"<span style='color:#8e8e93'>{lbl}</span>"
+                    f"<span style='color:#ffffff;font-family:var(--mono)'>{_fmt_big(v)}</span>"
                     f"</div>", unsafe_allow_html=True)
 
     with col_an:
@@ -7004,7 +7023,7 @@ def tab_stock_deep_dive() -> None:
           <div style='font-size:2rem;'>{emoji_k}</div>
           <div style='font-size:1.2rem; font-weight:700; color:{color_k};
                       font-family:var(--mono); margin-top:6px;'>{label_k}</div>
-          <div style='font-size:0.8rem; color:#6b7280; margin-top:4px;'>
+          <div style='font-size:0.8rem; color:#8e8e93; margin-top:4px;'>
             {d['n_analysts']} analistas</div>
         </div>
         """, unsafe_allow_html=True)
@@ -7013,14 +7032,14 @@ def tab_stock_deep_dive() -> None:
         if d.get("target_mean"):
             tm, tl, th = d["target_mean"], d.get("target_low",0), d.get("target_high",0)
             up = d.get("upside", 0) or 0
-            c_up = "#34d399" if up > 0 else "#f87171"
+            c_up = "#30d158" if up > 0 else "#ff453a"
             st.markdown(f"""
             <div style='font-family:var(--mono); font-size:0.83rem; line-height:2.0;'>
-            <span style='color:#6b7280'>Precio obj. medio</span>&emsp;
-            <b style='color:#e5e7eb'>${tm:.2f}</b>
+            <span style='color:#8e8e93'>Precio obj. medio</span>&emsp;
+            <b style='color:#ffffff'>${tm:.2f}</b>
             <span style='color:{c_up}; font-size:0.78rem;'> ({up:+.1%})</span><br>
-            <span style='color:#6b7280'>Rango objetivo</span>&emsp;
-            <span style='color:#e5e7eb'>${tl:.2f} – ${th:.2f}</span>
+            <span style='color:#8e8e93'>Rango objetivo</span>&emsp;
+            <span style='color:#ffffff'>${tl:.2f} – ${th:.2f}</span>
             </div>
             """, unsafe_allow_html=True)
 
@@ -7030,17 +7049,17 @@ def tab_stock_deep_dive() -> None:
             bpct = d["buy"]/total_an; hpct = d["hold"]/total_an; spct = d["sell"]/total_an
             st.markdown(
                 f'<div style="display:flex; height:12px; border-radius:6px; overflow:hidden; margin:12px 0;">'
-                f'<div style="width:{bpct*100:.0f}%; background:#34d399;"></div>'
-                f'<div style="width:{hpct*100:.0f}%; background:#fbbf24;"></div>'
-                f'<div style="width:{spct*100:.0f}%; background:#f87171;"></div></div>'
-                f'<div style="font-size:0.72rem; color:#6b7280; font-family:var(--mono);">'
+                f'<div style="width:{bpct*100:.0f}%; background:#30d158;"></div>'
+                f'<div style="width:{hpct*100:.0f}%; background:#ffd60a;"></div>'
+                f'<div style="width:{spct*100:.0f}%; background:#ff453a;"></div></div>'
+                f'<div style="font-size:0.72rem; color:#8e8e93; font-family:var(--mono);">'
                 f'🟢 {d["buy"]} &nbsp; 🟡 {d["hold"]} &nbsp; 🔴 {d["sell"]}</div>',
                 unsafe_allow_html=True
             )
 
         st.markdown("<br>", unsafe_allow_html=True)
         # Eventos
-        st.markdown("<span style='color:#6b7280;font-size:0.72rem;font-weight:600;'>PRÓXIMOS EVENTOS</span>", unsafe_allow_html=True)
+        st.markdown("<span style='color:#8e8e93;font-size:0.72rem;font-weight:600;'>PRÓXIMOS EVENTOS</span>", unsafe_allow_html=True)
         earn_d = d.get("next_earn_date")
         div_d  = d.get("ex_div_date")
         if earn_d:
@@ -7052,7 +7071,7 @@ def tab_stock_deep_dive() -> None:
 
         st.markdown("<br>", unsafe_allow_html=True)
         # Noticias
-        st.markdown("<span style='color:#6b7280;font-size:0.72rem;font-weight:600;'>NOTICIAS RECIENTES</span>", unsafe_allow_html=True)
+        st.markdown("<span style='color:#8e8e93;font-size:0.72rem;font-weight:600;'>NOTICIAS RECIENTES</span>", unsafe_allow_html=True)
         for n in d.get("news", [])[:6]:
             if n["title"]:
                 age_s = f" *{n['age']}*" if n.get("age") else ""
@@ -7088,8 +7107,8 @@ def tab_stock_deep_dive() -> None:
 
         analysis = st.session_state[ai_key]
         st.markdown(
-            f'<div style="background:rgba(22,22,31,0.8); border:1px solid rgba(79,142,247,0.2);\n'
-            f'border-radius:16px; padding:24px 28px; line-height:1.8; color:#e5e7eb;">\n'
+            f'<div style="background:rgba(22,22,31,0.8); border:1px solid rgba(10,132,255,0.2);\n'
+            f'border-radius:16px; padding:24px 28px; line-height:1.8; color:#ffffff;">\n'
             f'{analysis}\n</div>',
             unsafe_allow_html=True
         )
@@ -7137,14 +7156,14 @@ def show_onboarding() -> None:
     text-align: center;
     transition: border-color .2s;
 }
-.ob-step:hover { border-color: rgba(79,142,247,0.4); }
+.ob-step:hover { border-color: rgba(10,132,255,0.4); }
 .ob-num {
     width: 40px; height: 40px; border-radius: 50%;
-    background: rgba(79,142,247,0.15);
-    border: 1.5px solid rgba(79,142,247,0.4);
+    background: rgba(10,132,255,0.15);
+    border: 1.5px solid rgba(10,132,255,0.4);
     display: flex; align-items: center; justify-content: center;
     font-family: DM Mono, monospace; font-weight: 700;
-    color: #4f8ef7; font-size: 1rem; margin: 0 auto 14px;
+    color: #0a84ff; font-size: 1rem; margin: 0 auto 14px;
 }
 </style>
 
@@ -7155,7 +7174,7 @@ def show_onboarding() -> None:
                 font-family:DM Mono,monospace; letter-spacing:-1px;">
       Portfolio Manager
     </div>
-    <div style="font-size:1rem; color:#6b7280; margin-top:8px;">
+    <div style="font-size:1rem; color:#8e8e93; margin-top:8px;">
       Gestión inteligente de portafolios · Análisis técnico y fundamental · Rebalanceo óptimo
     </div>
   </div>
@@ -7179,18 +7198,18 @@ def show_onboarding() -> None:
             st.markdown(f"""
 <div class="ob-step">
   <div class="ob-num">{num}</div>
-  <div style="font-weight:700;color:#e5e7eb;margin-bottom:8px;">{title}</div>
-  <div style="font-size:0.82rem;color:#6b7280;line-height:1.6;">{desc}</div>
+  <div style="font-weight:700;color:#ffffff;margin-bottom:8px;">{title}</div>
+  <div style="font-size:0.82rem;color:#8e8e93;line-height:1.6;">{desc}</div>
 </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Quick-start: demo data
     st.markdown("""
-<div style="background:rgba(79,142,247,0.06);border:1px solid rgba(79,142,247,0.2);
+<div style="background:rgba(10,132,255,0.06);border:1px solid rgba(10,132,255,0.2);
             border-radius:14px;padding:16px 20px;text-align:center;">
-  <span style="font-size:0.85rem;color:#9ca3af;">
-  ✨ <b style="color:#e5e7eb;">Tip:</b> Puedes importar directamente desde un CSV de GBM, 
+  <span style="font-size:0.85rem;color:#aeaeb2;">
+  ✨ <b style="color:#ffffff;">Tip:</b> Puedes importar directamente desde un CSV de GBM, 
   IBKR o cualquier broker usando el importador de la pestaña <b>Portfolio Editor</b>.
   </span>
 </div>""", unsafe_allow_html=True)
@@ -7357,11 +7376,11 @@ def tab_thesis() -> None:
     # ── Indicador de cobertura ──────────────────────────────
     covered  = sum(1 for t in tickers if thesis.get(t, {}).get("thesis","").strip())
     st.markdown(f"""
-<div style="background:rgba(79,142,247,0.07);border:1px solid rgba(79,142,247,0.2);
+<div style="background:rgba(10,132,255,0.07);border:1px solid rgba(10,132,255,0.2);
             border-radius:12px;padding:12px 18px;margin-bottom:16px;
-            font-family:DM Mono,monospace;font-size:0.82rem;color:#9ca3af;">
+            font-family:DM Mono,monospace;font-size:0.82rem;color:#aeaeb2;">
   📝 Tesis documentadas:
-  <b style="color:{'#34d399' if covered==len(tickers) else '#fbbf24'}">
+  <b style="color:{'#30d158' if covered==len(tickers) else '#ffd60a'}">
     {covered}/{len(tickers)}</b> posiciones
   {'✓ Todas documentadas' if covered==len(tickers) else '— documenta las restantes para mejor seguimiento'}
 </div>""", unsafe_allow_html=True)
@@ -7379,9 +7398,9 @@ def tab_thesis() -> None:
         th = thesis.get(t, {})
         has_thesis = bool(th.get("thesis","").strip())
 
-        clr_pl = "#34d399" if pl_pct >= 0 else "#f87171"
-        clr_chg = "#34d399" if chg >= 0 else "#f87171"
-        border = "rgba(52,211,153,0.2)" if has_thesis else "rgba(255,255,255,0.06)"
+        clr_pl = "#30d158" if pl_pct >= 0 else "#ff453a"
+        clr_chg = "#30d158" if chg >= 0 else "#ff453a"
+        border = "rgba(48,209,88,0.2)" if has_thesis else "rgba(255,255,255,0.06)"
 
         with st.expander(
             f"{'✅' if has_thesis else '📝'} **{t}** — "
@@ -7459,11 +7478,11 @@ def tab_thesis() -> None:
                 # Métricas de la posición
                 if new_target > 0:
                     upside = (new_target - price) / price if price > 0 else 0
-                    up_c   = "#34d399" if upside > 0 else "#f87171"
+                    up_c   = "#30d158" if upside > 0 else "#ff453a"
                     kpi_card("Upside a objetivo", f"{upside:+.1%}", accent=up_c)
                 if new_stop > 0 and avg_cost > 0:
                     risk = (new_stop - avg_cost) / avg_cost
-                    kpi_card("Riesgo (stop)", f"{risk:.1%}", accent="#f87171")
+                    kpi_card("Riesgo (stop)", f"{risk:.1%}", accent="#ff453a")
                 kpi_card("P&L actual", f"{pl_pct:+.1%}", accent=clr_pl)
 
                 # Estado de la tesis
@@ -7556,7 +7575,7 @@ def tab_alerts() -> None:
                 active = al.get("active", True)
                 st.markdown(
                     f"<div style='font-family:DM Mono,monospace;font-size:0.78rem;"
-                    f"color:{'#e5e7eb' if active else '#6b7280'};padding:4px 0;'>"
+                    f"color:{'#ffffff' if active else '#8e8e93'};padding:4px 0;'>"
                     f"{'✅' if active else '⏸️'} <b>{al['ticker']}</b> — "
                     f"{al['label']}"
                     f"{(' @ $'+str(al['threshold'])) if al['type'] in ('price_above','price_below') else ''}"
@@ -7705,13 +7724,13 @@ def sidebar() -> None:
         _rate_ok = _cetes_fecha != "fallback"
         if _rate_ok:
             st.sidebar.markdown(
-                f"<div style='background:rgba(52,211,153,0.07);border:1px solid "
-                f"rgba(52,211,153,0.2);border-radius:10px;padding:10px 12px;'>"
-                f"<div style='font-size:0.6rem;color:#6b7280;font-family:DM Mono,"
+                f"<div style='background:rgba(48,209,88,0.07);border:1px solid "
+                f"rgba(48,209,88,0.2);border-radius:10px;padding:10px 12px;'>"
+                f"<div style='font-size:0.6rem;color:#8e8e93;font-family:DM Mono,"
                 f"monospace;text-transform:uppercase;letter-spacing:.8px;'>CETES 28D · {_cetes_fecha}</div>"
-                f"<div style='font-size:1.4rem;font-weight:800;color:#34d399;"
+                f"<div style='font-size:1.4rem;font-weight:800;color:#30d158;"
                 f"font-family:DM Mono,monospace;letter-spacing:-1px;'>{_cetes_rate*100:.2f}%</div>"
-                f"<div style='font-size:0.68rem;color:#6b7280;font-family:DM Mono,monospace;"
+                f"<div style='font-size:0.68rem;color:#8e8e93;font-family:DM Mono,monospace;"
                 f"margin-top:2px;'>Tasa libre de riesgo · Banxico SIE</div>"
                 f"</div>",
                 unsafe_allow_html=True,
@@ -7728,11 +7747,11 @@ def sidebar() -> None:
     else:
         st.session_state["rf_rate"] = 0.09
         st.sidebar.markdown(
-            "<div style='background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.18);"
-            "border-radius:10px;padding:10px 12px;font-size:0.78rem;color:#fbbf24;"
+            "<div style='background:rgba(255,214,10,0.06);border:1px solid rgba(255,214,10,0.18);"
+            "border-radius:10px;padding:10px 12px;font-size:0.78rem;color:#ffd60a;"
             "font-family:DM Mono,monospace;'>"
             "Sin token Banxico.<br>"
-            "<span style='color:#6b7280;font-size:0.7rem;'>Usando 9.0% por defecto.</span>"
+            "<span style='color:#8e8e93;font-size:0.7rem;'>Usando 9.0% por defecto.</span>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -7769,33 +7788,33 @@ def sidebar() -> None:
         st.sidebar.markdown(f"""
 <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);
             border-radius:12px;padding:12px 14px;margin-top:4px;">
-  <div style="font-size:0.58rem;font-weight:700;letter-spacing:1.5px;color:#4b5563;
+  <div style="font-size:0.58rem;font-weight:700;letter-spacing:1.5px;color:#636366;
               text-transform:uppercase;font-family:DM Mono,monospace;margin-bottom:8px;">
     PORTAFOLIO ACTIVO</div>
   <div style="font-family:DM Mono,monospace;font-weight:800;font-size:0.95rem;
-              color:#e5e7eb;margin-bottom:6px;">📁 {pname}</div>
+              color:#ffffff;margin-bottom:6px;">📁 {pname}</div>
   <div style="display:flex;justify-content:space-between;margin-top:2px;">
-    <span style="font-size:0.75rem;color:#6b7280;font-family:DM Mono,monospace;">
+    <span style="font-size:0.75rem;color:#8e8e93;font-family:DM Mono,monospace;">
       {n_pos} posiciones</span>
-    <span style="font-size:0.75rem;color:#6b7280;font-family:DM Mono,monospace;">
+    <span style="font-size:0.75rem;color:#8e8e93;font-family:DM Mono,monospace;">
       vs {bench}</span>
   </div>
 </div>
         """, unsafe_allow_html=True)
     else:
         st.sidebar.markdown("""
-<div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.2);
-            border-radius:10px;padding:10px 12px;font-size:0.8rem;color:#fbbf24;
+<div style="background:rgba(255,214,10,0.06);border:1px solid rgba(255,214,10,0.2);
+            border-radius:10px;padding:10px 12px;font-size:0.8rem;color:#ffd60a;
             font-family:DM Mono,monospace;">
   Sin portafolio cargado.<br>
-  <span style="color:#6b7280;font-size:0.72rem;">
-    Ve a <b style="color:#9ca3af;">💼 Portfolio</b> para empezar.</span>
+  <span style="color:#8e8e93;font-size:0.72rem;">
+    Ve a <b style="color:#aeaeb2;">💼 Portfolio</b> para empezar.</span>
 </div>
         """, unsafe_allow_html=True)
 
     st.sidebar.divider()
     st.sidebar.markdown(
-        "<div style='font-size:0.65rem;color:#374151;font-family:DM Mono,monospace;"
+        "<div style='font-size:0.65rem;color:#48484a;font-family:DM Mono,monospace;"
         "text-align:center;'>v2.0 · Portfolio Manager</div>",
         unsafe_allow_html=True,
     )
@@ -7824,7 +7843,7 @@ def tab_market_overview() -> None:
     for gname, gtickers in MARKET_GROUPS.items():
         st.markdown(
             f"<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
-            f"color:#4b5563;text-transform:uppercase;font-family:DM Mono,monospace;"
+            f"color:#636366;text-transform:uppercase;font-family:DM Mono,monospace;"
             f"margin:14px 0 8px;'>{gname}</div>", unsafe_allow_html=True)
         gcols = st.columns(len(gtickers))
         for gcol, t in zip(gcols, gtickers):
@@ -7832,14 +7851,14 @@ def tab_market_overview() -> None:
             px   = inf.get("price",      0.0)
             pv   = inf.get("prev_close", 0.0)
             chg  = (px - pv) / pv if pv > 0 else 0.0
-            clr  = "#34d399" if chg >= 0 else "#f87171"
+            clr  = "#30d158" if chg >= 0 else "#ff453a"
             arr  = "▲" if chg >= 0 else "▼"
             with gcol:
                 st.markdown(f"""
 <div style="background:rgba(22,22,31,0.7);border:1px solid rgba(255,255,255,0.07);
             border-radius:12px;padding:12px 14px;text-align:center;">
   <div style="font-family:DM Mono,monospace;font-weight:700;font-size:0.9rem;
-              color:#e5e7eb;">{t}</div>
+              color:#ffffff;">{t}</div>
   <div style="font-family:DM Mono,monospace;font-size:1.1rem;font-weight:700;
               color:#fff;margin-top:2px;">${px:,.2f}</div>
   <div style="font-size:0.82rem;color:{clr};font-family:DM Mono,monospace;">
@@ -7864,15 +7883,15 @@ def tab_market_overview() -> None:
         px   = inf.get("price",      0.0)
         pv   = inf.get("prev_close", 0.0)
         chg  = (px - pv) / pv if pv > 0 else 0.0
-        clr  = "#34d399" if chg >= 0 else "#f87171"
-        rgb  = "52,211,153" if chg >= 0 else "248,113,113"
+        clr  = "#30d158" if chg >= 0 else "#ff453a"
+        rgb  = "48,209,88" if chg >= 0 else "255,69,58"
         arr  = "▲" if chg >= 0 else "▼"
         with scols[i % 3]:
             st.markdown(f"""
 <div style="background:rgba({rgb},0.06);border:1px solid rgba({rgb},0.2);
             border-radius:10px;padding:10px 14px;margin-bottom:8px;
             display:flex;justify-content:space-between;align-items:center;">
-  <span style="font-size:0.8rem;color:#9ca3af;">{label}</span>
+  <span style="font-size:0.8rem;color:#aeaeb2;">{label}</span>
   <span style="font-family:DM Mono,monospace;font-weight:700;color:{clr};">
     {arr} {abs(chg):.2%}</span>
 </div>""", unsafe_allow_html=True)
@@ -7895,7 +7914,7 @@ def main() -> None:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown(
             "<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
-            "color:#4b5563;text-transform:uppercase;font-family:DM Mono,monospace;"
+            "color:#636366;text-transform:uppercase;font-family:DM Mono,monospace;"
             "margin-bottom:12px;'>EMPEZAR — AÑADE TU PRIMERA POSICIÓN</div>",
             unsafe_allow_html=True)
         tab_editor()
