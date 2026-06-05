@@ -6064,7 +6064,7 @@ def tab_analytics() -> None:
                               annotation_font=dict(size=9, color="#30d158", family="DM Mono"),
                               annotation_position="bottom right")
 
-        _sharpe_fig.update_layout(**PLOTLY_LAYOUT, height=300,
+        _sharpe_fig.update_layout(**_pl(), height=300,
                                   paper_bgcolor="#000000", plot_bgcolor="#000000")
         _sharpe_fig.update_yaxes(title_text="Sharpe (rolling)", range=[_sh_lo, _sh_hi],
                                  showgrid=True, gridcolor="rgba(255,255,255,0.05)",
