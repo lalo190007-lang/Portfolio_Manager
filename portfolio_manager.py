@@ -446,6 +446,19 @@ hr { border-color: var(--border) !important; }
     overflow: hidden !important;
     border: 1px solid var(--border) !important;
 }
+
+/* ── Plotly chart containers — card con fondo propio ─────── */
+[data-testid="stPlotlyChart"] {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-lg) !important;
+    overflow: hidden !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+[data-testid="stPlotlyChart"]:hover {
+    border-color: var(--border-hi) !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,.45) !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1732,65 +1745,78 @@ def tab_dashboard() -> None:
         if port_c is not None and len(port_c) > 0:
             fig_l = go.Figure()
 
-            # Calcular rango del eje Y ajustado a los datos reales
+            # Rango Y ajustado a los datos reales (sin incluir el 0)
             _all_vals = list(port_c.values)
             if bench_c is not None:
                 _all_vals += list(bench_c.values)
             _y_min = min(_all_vals)
             _y_max = max(_all_vals)
-            _y_pad = (_y_max - _y_min) * 0.08 + 1  # 8% de padding + 1 punto
-            _y_lo  = _y_min - _y_pad
-            _y_hi  = _y_max + _y_pad
+            _y_pad = max((_y_max - _y_min) * 0.10, 2)
+            _y_lo, _y_hi = _y_min - _y_pad, _y_max + _y_pad
 
-            # Línea fantasma en la base del fill para que el área quede bien encuadrada
-            fig_l.add_trace(go.Scatter(
-                x=port_c.index, y=[_y_lo] * len(port_c),
-                mode="lines", line=dict(width=0),
-                showlegend=False, hoverinfo="skip",
-            ))
-            # Area portfolio (fill hasta la línea fantasma, no hasta cero)
-            fig_l.add_trace(go.Scatter(
-                x=port_c.index, y=port_c.values, name="Portafolio (TWR)",
-                mode="lines", line=dict(color="#0a84ff", width=2.5),
-                fill="tonexty", fillcolor="rgba(10,132,255,0.10)",
-                hovertemplate="<b>Portafolio TWR</b>: %{y:.1f}<extra></extra>",
-            ))
+            # Benchmark primero (atrás)
             if bench_c is not None:
                 fig_l.add_trace(go.Scatter(
                     x=bench_c.index, y=bench_c.values, name=bench,
-                    mode="lines", line=dict(color="#636366", width=1.5, dash="dot"),
+                    mode="lines",
+                    line=dict(color="rgba(142,142,147,0.5)", width=1.2, dash="dot"),
                     hovertemplate=f"<b>{bench}</b>: %{{y:.1f}}<extra></extra>",
                 ))
-            # Anotación del valor final
+
+            # Fill sutil debajo del portafolio
+            _fill_clr = "rgba(10,132,255,0.08)" if float(port_c.iloc[-1]) >= 100 else "rgba(255,69,58,0.07)"
+            fig_l.add_trace(go.Scatter(
+                x=port_c.index, y=port_c.values, name="Portafolio (TWR)",
+                mode="lines",
+                line=dict(color="#0a84ff", width=2.5),
+                fill="tozeroy", fillcolor=_fill_clr,
+                hovertemplate="TWR: <b>%{y:.1f}</b><extra></extra>",
+            ))
+
+            # Punto final destacado
+            fig_l.add_trace(go.Scatter(
+                x=[port_c.index[-1]], y=[float(port_c.iloc[-1])],
+                mode="markers", showlegend=False,
+                marker=dict(color="#0a84ff", size=8,
+                            line=dict(color="#ffffff", width=1.5)),
+                hoverinfo="skip",
+            ))
+
+            # Anotación del delta final
             _final_port = float(port_c.iloc[-1])
-            _delta_lbl = f"{_final_port - 100:+.1f}%"
-            _anno_clr  = "#30d158" if _final_port >= 100 else "#ff453a"
+            _anno_clr   = "#30d158" if _final_port >= 100 else "#ff453a"
             fig_l.add_annotation(
                 x=port_c.index[-1], y=_final_port,
-                text=f"<b>{_delta_lbl}</b>",
+                text=f"<b>{_final_port - 100:+.1f}%</b>",
                 showarrow=False, xanchor="left", yanchor="middle",
-                font=dict(size=11, color=_anno_clr, family="DM Mono"),
-                xshift=6,
+                font=dict(size=12, color=_anno_clr, family="DM Mono"),
+                xshift=8,
             )
+
             # Línea base 100
             fig_l.add_hline(y=100, line_width=1, line_dash="dot",
-                            line_color="rgba(255,255,255,0.10)")
+                            line_color="rgba(255,255,255,0.12)")
+
             fig_l.update_layout(
                 **_pl(),
-                title=dict(text="Rendimiento TWR (base 100) — desde primera compra",
-                           font=dict(size=11, color="#636366"), x=0),
-                height=300, margin=dict(t=36, b=32, l=10, r=48),
+                paper_bgcolor="#1c1c1e",
+                plot_bgcolor="rgba(0,0,0,0)",
+                title=dict(text="Rendimiento TWR (base 100)",
+                           font=dict(size=11, color="#636366", family="DM Mono"), x=0),
+                height=308, margin=dict(t=40, b=32, l=8, r=52),
                 hovermode="x unified",
-                legend=dict(orientation="h", y=1.1, x=0,
-                            font=dict(size=11, color="#8e8e93"),
+                legend=dict(orientation="h", y=1.08, x=0,
+                            font=dict(size=10, color="#8e8e93"),
                             bgcolor="rgba(0,0,0,0)"),
             )
             fig_l.update_xaxes(showgrid=False, zeroline=False,
-                               tickfont=dict(size=10, color="#48484a"))
+                               tickfont=dict(size=9, color="#636366", family="DM Mono"),
+                               tickcolor="rgba(255,255,255,0.06)")
             fig_l.update_yaxes(range=[_y_lo, _y_hi],
-                               showgrid=True, gridcolor="rgba(255,255,255,0.05)",
+                               showgrid=True,
+                               gridcolor="rgba(255,255,255,0.04)",
                                zeroline=False,
-                               tickfont=dict(size=10, color="#48484a"))
+                               tickfont=dict(size=9, color="#636366", family="DM Mono"))
             st.plotly_chart(fig_l, use_container_width=True, config=PLOTLY_CONFIG)
         else:
             st.info("Sin datos históricos aún. Agrega transacciones con fecha para ver la curva.")
@@ -1802,30 +1828,33 @@ def tab_dashboard() -> None:
     with col_donut:
         fig_d = go.Figure(go.Pie(
             labels=df_live["Emisora"], values=df_live["Valor"],
-            hole=0.65,
+            hole=0.72,
             marker_colors=CHART_COLORS[:len(df_live)],
-            marker=dict(line=dict(color="rgba(10,10,15,0.6)", width=2)),
+            marker=dict(line=dict(color="#1c1c1e", width=2.5)),
             textinfo="none",
-            hovertemplate="<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>",
-            direction="clockwise", sort=False,
-            pull=[0.02] * len(df_live),   # ligero pull para profundidad
+            hovertemplate="<b>%{label}</b>  %{percent}<br>$%{value:,.2f}<extra></extra>",
+            direction="clockwise", sort=True,
         ))
-        # Anotación central con NAV y n posiciones
+        # Anotación central: valor en grande + n activos debajo
+        _nav_str = f"${nav:,.0f}" if nav < 1_000_000 else f"${nav/1_000:.0f}K"
         fig_d.add_annotation(
-            text=f"<b>${nav:,.0f}</b><br><span style='font-size:10px'>{len(df_live)} activos</span>",
+            text=(f"<b style='font-size:17px'>{_nav_str}</b>"
+                  f"<br><span style='font-size:11px;color:#636366'>{len(df_live)} activos</span>"),
             x=0.5, y=0.5, align="center",
-            font=dict(size=13, color="#ffffff", family="DM Mono"),
+            font=dict(family="DM Mono, monospace", color="#ffffff"),
             showarrow=False,
         )
         fig_d.update_layout(
             **_pl(),
-            title=dict(text="Composición del portafolio",
-                       font=dict(size=11, color="#636366"), x=0),
-            height=300, margin=dict(t=36, b=10, l=10, r=10),
+            paper_bgcolor="#1c1c1e",
+            plot_bgcolor="rgba(0,0,0,0)",
+            title=dict(text="Composición", font=dict(size=11, color="#636366", family="DM Mono"), x=0),
+            height=308, margin=dict(t=40, b=10, l=10, r=16),
             showlegend=True,
-            legend=dict(orientation="v", x=1.01, y=0.5, xanchor="left",
-                        font=dict(size=11, color="#8e8e93"),
-                        bgcolor="rgba(0,0,0,0)", tracegroupgap=2),
+            legend=dict(orientation="v", x=1.02, y=0.5, xanchor="left",
+                        font=dict(size=10, color="#8e8e93", family="DM Mono"),
+                        bgcolor="rgba(0,0,0,0)", tracegroupgap=1,
+                        itemsizing="constant"),
             hovermode="closest",
         )
         st.plotly_chart(fig_d, use_container_width=True, config=PLOTLY_CONFIG)
@@ -1860,73 +1889,96 @@ def tab_dashboard() -> None:
         df_pnl = pd.DataFrame(pnl_rows).sort_values("Total")
 
         fig_b = go.Figure()
-        # Barra: P&L no realizado (posición abierta)
+        # P&L no realizado — barra principal, colores sólidos Apple
+        _unr_colors = ["#30d158" if v >= 0 else "#ff453a" for v in df_pnl["No realizado"]]
         fig_b.add_trace(go.Bar(
             name="No realizado",
-            x=df_pnl["Ticker"],
-            y=df_pnl["No realizado"],
-            marker_color=["#30d158" if v >= 0 else "#ff453a"
-                          for v in df_pnl["No realizado"]],
-            marker_line_width=0,
-            hovertemplate="<b>%{x}</b><br>No realizado: $%{y:+,.2f}<extra></extra>",
+            x=df_pnl["Ticker"], y=df_pnl["No realizado"],
+            marker=dict(
+                color=_unr_colors,
+                opacity=0.92,
+                line=dict(width=0),
+                cornerradius=4,
+            ),
+            hovertemplate="<b>%{x}</b><br>No realizado: <b>$%{y:+,.2f}</b><extra></extra>",
         ))
-        # Barra: P&L realizado (ventas pasadas)
+        # P&L realizado — semitransparente encima
         if df_pnl["Realizado"].abs().sum() > 0:
+            _rel_colors = ["rgba(48,209,88,0.55)" if v >= 0 else "rgba(255,69,58,0.55)"
+                           for v in df_pnl["Realizado"]]
             fig_b.add_trace(go.Bar(
                 name="Realizado (ventas)",
-                x=df_pnl["Ticker"],
-                y=df_pnl["Realizado"],
-                marker_color=["rgba(48,209,88,0.45)" if v >= 0 else "rgba(255,69,58,0.45)"
-                              for v in df_pnl["Realizado"]],
-                marker_line_width=0,
-                hovertemplate="<b>%{x}</b><br>Realizado: $%{y:+,.2f}<extra></extra>",
+                x=df_pnl["Ticker"], y=df_pnl["Realizado"],
+                marker=dict(color=_rel_colors, line=dict(width=0), cornerradius=4),
+                hovertemplate="<b>%{x}</b><br>Realizado: <b>$%{y:+,.2f}</b><extra></extra>",
             ))
+
+        # Valor total encima de cada barra
+        for _, _row in df_pnl.iterrows():
+            _tot = _row["Total"]
+            if abs(_tot) > 0.5:
+                fig_b.add_annotation(
+                    x=_row["Ticker"], y=_tot,
+                    text=f"${_tot:+.0f}",
+                    showarrow=False, yanchor="bottom" if _tot >= 0 else "top",
+                    yshift=4 if _tot >= 0 else -4,
+                    font=dict(size=9, color="#8e8e93", family="DM Mono"),
+                )
+
         fig_b.update_layout(
             **_pl(),
+            paper_bgcolor="#1c1c1e",
+            plot_bgcolor="rgba(0,0,0,0)",
             barmode="stack",
-            title=dict(text="P&L por posición (abierto + realizado)",
-                       font=dict(size=12, color="#636366"), x=0),
-            height=280, margin=dict(t=36,b=20,l=10,r=10),
-            xaxis=dict(showgrid=False, zeroline=False,
-                       tickfont=dict(size=11, color="#8e8e93", family="DM Mono")),
-            yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.03)",
-                       zeroline=True, zerolinecolor="rgba(255,255,255,0.08)",
-                       tickfont=dict(size=10, color="#48484a"), tickprefix="$"),
+            bargap=0.32,
+            title=dict(text="P&L por posición",
+                       font=dict(size=11, color="#636366", family="DM Mono"), x=0),
+            height=308, margin=dict(t=40, b=20, l=8, r=10),
             legend=dict(orientation="h", y=1.08, x=0,
                         font=dict(size=10, color="#8e8e93"),
                         bgcolor="rgba(0,0,0,0)"),
             hovermode="x unified",
         )
+        fig_b.update_xaxes(showgrid=False, zeroline=False,
+                           tickfont=dict(size=10, color="#8e8e93", family="DM Mono"),
+                           tickcolor="rgba(255,255,255,0.05)")
+        fig_b.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.04)",
+                           zeroline=True, zerolinecolor="rgba(255,255,255,0.12)",
+                           tickfont=dict(size=9, color="#636366", family="DM Mono"),
+                           tickprefix="$")
         st.plotly_chart(fig_b, use_container_width=True, config=PLOTLY_CONFIG)
 
     with col_drift_c:
         df_dr = df_live[df_live["Drift"].abs() > 0.001]
         if tw and not df_dr.empty:
             df_dr2 = df_dr.sort_values("Drift")
+            _dr_colors = ["#30d158" if v > 0 else "#ff453a" for v in df_dr2["Drift"]]
             fig_dr = go.Figure(go.Bar(
-                x=df_dr2["Drift"]*100,
-                y=df_dr2["Emisora"],
+                x=df_dr2["Drift"] * 100, y=df_dr2["Emisora"],
                 orientation="h",
-                marker_color=["#30d158" if v>0 else "#ff453a" for v in df_dr2["Drift"]],
-                marker_line_width=0,
-                hovertemplate="%{y}: %{x:+.1f}pp<extra></extra>",
-                text=[f"{v:+.1f}pp" for v in df_dr2["Drift"]*100],
+                marker=dict(color=_dr_colors, opacity=0.88,
+                            line=dict(width=0), cornerradius=4),
+                hovertemplate="<b>%{y}</b>: %{x:+.1f}pp<extra></extra>",
+                text=[f"{v:+.1f}pp" for v in df_dr2["Drift"] * 100],
                 textposition="outside",
                 textfont=dict(size=10, color="#8e8e93", family="DM Mono"),
             ))
             fig_dr.update_layout(
                 **_pl(),
-                title=dict(text="Drift vs target allocation",
-                           font=dict(size=12, color="#636366"), x=0),
-                height=260, margin=dict(t=36,b=20,l=10,r=40),
-                xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.03)",
-                           zeroline=True, zerolinecolor="rgba(255,255,255,0.1)",
-                           tickfont=dict(size=10, color="#48484a"), ticksuffix="pp"),
-                yaxis=dict(showgrid=False, zeroline=False,
-                           tickfont=dict(size=11, color="#8e8e93", family="DM Mono")),
+                paper_bgcolor="#1c1c1e",
+                plot_bgcolor="rgba(0,0,0,0)",
+                title=dict(text="Drift vs target",
+                           font=dict(size=11, color="#636366", family="DM Mono"), x=0),
+                height=308, margin=dict(t=40, b=20, l=10, r=52),
                 showlegend=False,
                 hovermode="y unified",
             )
+            fig_dr.update_xaxes(showgrid=True, gridcolor="rgba(255,255,255,0.04)",
+                                zeroline=True, zerolinecolor="rgba(255,255,255,0.14)",
+                                tickfont=dict(size=9, color="#636366", family="DM Mono"),
+                                ticksuffix="pp")
+            fig_dr.update_yaxes(showgrid=False, zeroline=False,
+                                tickfont=dict(size=10, color="#8e8e93", family="DM Mono"))
             st.plotly_chart(fig_dr, use_container_width=True, config=PLOTLY_CONFIG)
         else:
             st.info("Configura target weights para ver el drift.")
