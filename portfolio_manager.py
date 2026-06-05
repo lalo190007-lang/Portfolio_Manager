@@ -6020,8 +6020,9 @@ def tab_analytics() -> None:
         }
         _port_r = sum(returns_df[t].fillna(0) * w for t, w in _w_an.items())
         _sharpe_fig = go.Figure()
-        _sharpe_colors = {"30D": "#0a84ff", "60D": "#30d158", "90D": "#ffd60a"}
+        _sharpe_colors  = {"30D": "#0a84ff", "60D": "#30d158", "90D": "#ffd60a"}
         _sharpe_windows = {"30D": 30, "60D": 60, "90D": 90}
+        _all_sharpe_vals = []
         for _lbl, _win in _sharpe_windows.items():
             if len(_port_r) < _win + 5:
                 continue
@@ -6029,20 +6030,47 @@ def tab_analytics() -> None:
                 lambda x: (x.mean() - _rf_daily) / (x.std() + 1e-9) * np.sqrt(252),
                 raw=True,
             ).dropna()
+            _all_sharpe_vals.extend(_rs.values.tolist())
             _sharpe_fig.add_trace(go.Scatter(
                 x=_rs.index, y=_rs.values, name=_lbl,
-                line=dict(color=_sharpe_colors[_lbl], width=2),
+                line=dict(color=_sharpe_colors[_lbl], width=1.8),
                 hovertemplate=f"<b>{_lbl}</b>: %{{y:.2f}}<extra></extra>",
             ))
+
+        # Rango Y basado en datos reales + padding generoso
+        if _all_sharpe_vals:
+            _sh_min = min(_all_sharpe_vals)
+            _sh_max = max(_all_sharpe_vals)
+            _sh_pad = max((_sh_max - _sh_min) * 0.20, 0.5)
+            _sh_lo  = _sh_min - _sh_pad
+            _sh_hi  = _sh_max + _sh_pad
+            # Asegurar que 0 y 1 siempre queden visibles
+            _sh_lo  = min(_sh_lo, -0.5)
+            _sh_hi  = max(_sh_hi,  1.5)
+        else:
+            _sh_lo, _sh_hi = -1, 2
+
+        # Zonas con add_shape (respeta el rango del eje, no lo fuerza)
+        _sharpe_fig.add_shape(type="rect", x0=0, x1=1, y0=0, y1=_sh_hi,
+            xref="paper", yref="y",
+            fillcolor="rgba(48,209,88,0.04)", line_width=0)
+        _sharpe_fig.add_shape(type="rect", x0=0, x1=1, y0=_sh_lo, y1=0,
+            xref="paper", yref="y",
+            fillcolor="rgba(255,69,58,0.04)", line_width=0)
+
         _sharpe_fig.add_hline(y=0, line_color="rgba(255,255,255,0.15)", line_dash="dash")
-        _sharpe_fig.add_hline(y=1, line_color="rgba(48,209,88,0.3)", line_dash="dot",
+        _sharpe_fig.add_hline(y=1, line_color="rgba(48,209,88,0.35)", line_dash="dot",
                               annotation_text="Sharpe = 1",
                               annotation_font=dict(size=9, color="#30d158", family="DM Mono"),
                               annotation_position="bottom right")
-        _sharpe_fig.add_hrect(y0=0, y1=50,   fillcolor="rgba(48,209,88,0.03)", line_width=0)
-        _sharpe_fig.add_hrect(y0=-50, y1=0,  fillcolor="rgba(255,69,58,0.03)", line_width=0)
+
         _sharpe_fig.update_layout(**PLOTLY_LAYOUT, height=300,
-                                  yaxis_title="Sharpe (anualizado rolling)")
+                                  paper_bgcolor="#000000", plot_bgcolor="#000000")
+        _sharpe_fig.update_yaxes(title_text="Sharpe (rolling)", range=[_sh_lo, _sh_hi],
+                                 showgrid=True, gridcolor="rgba(255,255,255,0.05)",
+                                 tickfont=dict(size=9, color="#636366", family="DM Mono"))
+        _sharpe_fig.update_xaxes(showgrid=False,
+                                 tickfont=dict(size=9, color="#636366", family="DM Mono"))
         st.plotly_chart(_sharpe_fig, use_container_width=True, config=PLOTLY_CONFIG)
     else:
         st.info("Sin precios live para calcular rolling Sharpe.")
