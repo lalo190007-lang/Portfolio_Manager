@@ -5737,14 +5737,11 @@ def tab_analytics() -> None:
                 borderwidth=0,
             ),
         ))
-        fig_corr.update_layout(
-            **PLOTLY_LAYOUT,
-            height=max(340, _n * 56 + 100),
-            xaxis=dict(tickfont=dict(size=11, color="#9ca3af", family="DM Mono"),
-                       side="bottom", showgrid=False),
-            yaxis=dict(tickfont=dict(size=11, color="#9ca3af", family="DM Mono"),
-                       showgrid=False, autorange="reversed"),
-        )
+        fig_corr.update_layout(**PLOTLY_LAYOUT, height=max(340, _n * 56 + 100))
+        fig_corr.update_xaxes(tickfont=dict(size=11, color="#9ca3af", family="DM Mono"),
+                              side="bottom", showgrid=False)
+        fig_corr.update_yaxes(tickfont=dict(size=11, color="#9ca3af", family="DM Mono"),
+                              showgrid=False, autorange="reversed")
         st.plotly_chart(fig_corr, use_container_width=True, config=PLOTLY_CONFIG)
 
         # Auto-insight: par más/menos correlacionado
