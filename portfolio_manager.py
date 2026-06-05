@@ -5907,6 +5907,7 @@ def tab_analytics() -> None:
         * _prices_live_an.get(t, {}).get("price", 0)
         for t in tickers if t in returns_df.columns
     )
+    _port_r = pd.Series(dtype=float)  # default vacío
     if _nav_an > 0:
         _w_an = {
             t: hdf.loc[hdf["Ticker"] == t, "Shares"].sum()
@@ -6174,8 +6175,12 @@ def tab_analytics() -> None:
         _total_periods = _dca_years * _periods_per_year
 
         # Usar retorno anualizado histórico del portafolio si está disponible
-        _port_ann_ret = port_metrics.get("Retorno Anualizado", 0.08) if rows else 0.08
-        _port_vol_ann = port_metrics.get("Volatilidad Anual", 0.15) if rows else 0.15
+        if not _port_r.empty and len(_port_r) > 20:
+            _port_ann_ret = float((1 + _port_r.mean()) ** 252 - 1)
+            _port_vol_ann = float(_port_r.std() * np.sqrt(252))
+        else:
+            _port_ann_ret = 0.08
+            _port_vol_ann = 0.15
         _r_per_period = _port_ann_ret / _periods_per_year
         _vol_per_period = _port_vol_ann / np.sqrt(_periods_per_year)
 
