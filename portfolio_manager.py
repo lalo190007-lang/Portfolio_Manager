@@ -1894,8 +1894,8 @@ def tab_dashboard() -> None:
     # ═══════════════════════════════════════════════════════════
     # SECCIÓN 3.5: MARKET PULSE — Movimiento diario de cada acción
     # ═══════════════════════════════════════════════════════════
-    # ── Refresh button + header ──────────────────────────────
-    hdr_col, btn_col = st.columns([4, 1])
+    # ── Refresh button + header + toggle ─────────────────────
+    hdr_col, tog_col, btn_col = st.columns([4, 1, 1])
     with hdr_col:
         st.markdown(
             "<div style='font-size:0.72rem;font-weight:700;letter-spacing:1.2px;"
@@ -1907,7 +1907,12 @@ def tab_dashboard() -> None:
             "background:linear-gradient(90deg,#4f8ef7,rgba(79,142,247,0));border-radius:2px;'>"
             "</div></div>",
             unsafe_allow_html=True)
+    with tog_col:
+        st.markdown("<div style='margin-top:14px;'></div>", unsafe_allow_html=True)
+        _pulse_table_mode = st.toggle("Tabla", key="pulse_table_mode",
+                                      help="Alternar entre tarjetas y tabla compacta")
     with btn_col:
+        st.markdown("<div style='margin-top:14px;'></div>", unsafe_allow_html=True)
         if st.button("🔄 Refresh", key="pulse_refresh",
                      help="Actualiza los precios del Market Pulse ahora mismo"):
             fetch_pulse_data.clear()
@@ -2092,8 +2097,74 @@ def tab_dashboard() -> None:
 
 </div>"""
 
-    # Responsive CSS grid — auto-fit columns min 220px
-    st.markdown(f"""
+    if _pulse_table_mode:
+        # ── Modo tabla compacta ───────────────────────────────
+        _tbl_rows = ""
+        for _, _rd in df_live.iterrows():
+            _tt   = str(_rd["Emisora"])
+            _ppd  = pulse.get(_tt, {})
+            _pc   = _ppd.get("change_vs_prev", _ppd.get("change_1d", 0.0)) or 0.0
+            _pr   = _ppd.get("price", float(_rd["Precio"]))
+            _rsi  = _ppd.get("rsi14")
+            _pnl  = float(_rd["P&L $"])
+            _pnlp = float(_rd["P&L %"])
+            _peso = float(_rd["Peso"])
+            _dc   = "#34d399" if _pc >= 0 else "#f87171"
+            _pc_arr = "▲" if _pc >= 0 else "▼"
+            _pnl_c = "#34d399" if _pnl >= 0 else "#f87171"
+            _rsi_c = ("#f87171" if (_rsi or 50) >= 70 else
+                      "#34d399" if (_rsi or 50) <= 30 else "#6b7280")
+            _rsi_s = f"{_rsi:.0f}" if _rsi else "—"
+            _tbl_rows += f"""
+<tr onmouseover="this.style.background='rgba(255,255,255,0.025)'"
+    onmouseout="this.style.background='transparent'"
+    style="border-bottom:1px solid rgba(255,255,255,0.04);transition:background .15s;">
+  <td style="padding:10px 16px;font-family:DM Mono,monospace;font-weight:800;
+             font-size:0.88rem;color:#4f8ef7;white-space:nowrap;">{_tt}</td>
+  <td style="padding:10px 16px;font-family:DM Mono,monospace;font-weight:700;
+             font-size:0.88rem;color:#e5e7eb;white-space:nowrap;">${_pr:,.2f}</td>
+  <td style="padding:10px 12px;font-family:DM Mono,monospace;font-size:0.88rem;
+             font-weight:700;color:{_dc};white-space:nowrap;">
+    {_pc_arr} {abs(_pc):.2%}</td>
+  <td style="padding:10px 12px;font-family:DM Mono,monospace;font-size:0.84rem;
+             font-weight:700;color:{_pnl_c};white-space:nowrap;">
+    {_pnlp*100:+.2f}%</td>
+  <td style="padding:10px 12px;font-family:DM Mono,monospace;font-size:0.84rem;
+             font-weight:700;color:{_rsi_c};white-space:nowrap;">RSI {_rsi_s}</td>
+  <td style="padding:10px 16px;min-width:110px;">
+    <div style="display:flex;align-items:center;gap:7px;">
+      <div style="flex:1;background:rgba(255,255,255,0.06);border-radius:3px;height:3px;">
+        <div style="width:{min(100,_peso*100*4):.0f}%;height:100%;
+                    background:#4f8ef7;border-radius:3px;"></div>
+      </div>
+      <span style="font-size:0.74rem;color:#6b7280;font-family:DM Mono,monospace;
+                   white-space:nowrap;">{_peso:.1%}</span>
+    </div>
+  </td>
+</tr>"""
+        _th2 = ("padding:9px 16px;text-align:left;font-family:DM Mono,monospace;"
+                "font-size:0.67rem;font-weight:700;color:#4b5563;text-transform:uppercase;"
+                "letter-spacing:.9px;border-bottom:1px solid rgba(255,255,255,0.07);"
+                "background:rgba(255,255,255,0.025);white-space:nowrap;")
+        st.markdown(f"""
+<div style="border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.07);
+            margin-bottom:16px;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr>
+      <th style="{_th2}">Ticker</th>
+      <th style="{_th2}">Precio</th>
+      <th style="{_th2}">Hoy</th>
+      <th style="{_th2}">P&amp;L</th>
+      <th style="{_th2}">RSI</th>
+      <th style="{_th2}">Peso</th>
+    </tr></thead>
+    <tbody>{_tbl_rows}</tbody>
+  </table>
+</div>
+""", unsafe_allow_html=True)
+    else:
+        # ── Modo tarjetas (grid) ──────────────────────────────
+        st.markdown(f"""
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
             gap:14px;margin-bottom:16px;">
   {cards_html}
@@ -5602,8 +5673,8 @@ def tab_performance() -> None:
     st.plotly_chart(fig_perf, use_container_width=True, config=PLOTLY_CONFIG)
 
     # ── Drawdown ──────────────────────────────────────────────
-    section("UNDERWATER (DRAWDOWN)")
-    cum = (1 + port_returns).cumprod()
+    section("UNDERWATER — CAÍDAS DESDE MÁXIMOS")
+    cum  = (1 + port_returns).cumprod()
     peak = cum.cummax()
     dd   = (cum - peak) / peak * 100
 
@@ -5613,28 +5684,61 @@ def tab_performance() -> None:
         peak_b = cum_b.cummax()
         bench_dd_series = (cum_b - peak_b) / peak_b * 100
 
+    max_dd_val  = float(dd.min())
+    max_dd_date = dd.idxmin()
+    curr_dd_val = float(dd.iloc[-1]) if len(dd) else 0.0
+
     fig_dd = go.Figure()
-    fig_dd.add_trace(go.Scatter(
-        x=dd.index, y=dd.values,
-        fill="tozeroy",
-        name="Portafolio",
-        line=dict(color="#f87171", width=1.5),
-        fillcolor="rgba(248,113,113,0.15)",
-        hovertemplate="%{y:.1f}%<extra>Portafolio</extra>",
-    ))
+    # Severity zones
+    fig_dd.add_hrect(y0=-10, y1=0,   fillcolor="rgba(248,113,113,0.04)", line_width=0)
+    fig_dd.add_hrect(y0=-20, y1=-10, fillcolor="rgba(248,113,113,0.08)", line_width=0)
+    fig_dd.add_hrect(y0=-100,y1=-20, fillcolor="rgba(248,113,113,0.13)", line_width=0)
+    # Severity labels
+    for lvl, lbl in [(-5,"Leve"),(-15,"Moderado"),(-30,"Severo")]:
+        fig_dd.add_annotation(x=dd.index[min(5,len(dd)-1)], y=lvl,
+            text=lbl, showarrow=False,
+            font=dict(size=9, color="rgba(248,113,113,0.4)", family="DM Mono"),
+            xanchor="left")
+    # Benchmark line
     if not bench_dd_series.empty:
         fig_dd.add_trace(go.Scatter(
             x=bench_dd_series.index, y=bench_dd_series.values,
-            name=bench,
-            line=dict(color="#6b7280", width=1, dash="dot"),
+            name=bench, line=dict(color="#6b7280", width=1.2, dash="dot"),
             hovertemplate="%{y:.1f}%<extra>" + bench + "</extra>",
         ))
+    # Portfolio fill
+    fig_dd.add_trace(go.Scatter(
+        x=dd.index, y=dd.values,
+        fill="tozeroy", name="Portafolio",
+        line=dict(color="#f87171", width=2),
+        fillcolor="rgba(248,113,113,0.18)",
+        hovertemplate="%{y:.2f}%<extra>Drawdown</extra>",
+    ))
+    # Max DD marker
+    if max_dd_date is not None:
+        fig_dd.add_annotation(
+            x=max_dd_date, y=max_dd_val,
+            text=f"Máx DD<br>{max_dd_val:.1f}%",
+            showarrow=True, arrowhead=2, arrowcolor="#f87171", arrowsize=0.8,
+            font=dict(size=10, color="#f87171", family="DM Mono"),
+            bgcolor="rgba(10,10,15,0.85)", bordercolor="#f87171",
+            borderwidth=1, borderpad=4, ax=30, ay=-30,
+        )
     fig_dd.update_layout(
-        **PLOTLY_LAYOUT,
-        yaxis_title="Drawdown (%)",
-        height=300,
+        **PLOTLY_LAYOUT, height=320, yaxis_title="Caída desde máximo (%)",
     )
     st.plotly_chart(fig_dd, use_container_width=True, config=PLOTLY_CONFIG)
+
+    # Stats row
+    _in_dd = curr_dd_val < -0.5
+    _dd_clr = "#f87171" if _in_dd else "#34d399"
+    st.markdown(
+        f"<div style='display:flex;gap:32px;font-family:DM Mono,monospace;"
+        f"font-size:0.82rem;color:#6b7280;margin-top:-8px;margin-bottom:16px;'>"
+        f"<span>Máx Drawdown: <b style='color:#f87171;'>{max_dd_val:.2f}%</b></span>"
+        f"<span>DD actual: <b style='color:{_dd_clr};'>{curr_dd_val:.2f}%</b></span>"
+        f"<span>{'⚠️ En drawdown' if _in_dd else '✓ En máximos'}</span>"
+        f"</div>", unsafe_allow_html=True)
 
     # ── Tabla completa de métricas ────────────────────────────
     section("MÉTRICAS COMPLETAS")
@@ -5794,6 +5898,135 @@ def tab_analytics() -> None:
             use_container_width=True,
         )
 
+    # ── Rolling Sharpe del portafolio ────────────────────────
+    section("ROLLING SHARPE — PORTAFOLIO")
+    _rf_daily = st.session_state.get("rf_rate", 0.09) / 252
+    _prices_live_an = fetch_live_prices(tickers)
+    _nav_an = sum(
+        hdf.loc[hdf["Ticker"] == t, "Shares"].sum()
+        * _prices_live_an.get(t, {}).get("price", 0)
+        for t in tickers if t in returns_df.columns
+    )
+    if _nav_an > 0:
+        _w_an = {
+            t: hdf.loc[hdf["Ticker"] == t, "Shares"].sum()
+               * _prices_live_an.get(t, {}).get("price", 0) / _nav_an
+            for t in tickers if t in returns_df.columns
+        }
+        _port_r = sum(returns_df[t].fillna(0) * w for t, w in _w_an.items())
+        _sharpe_fig = go.Figure()
+        _sharpe_colors = {"30D": "#4f8ef7", "60D": "#34d399", "90D": "#fbbf24"}
+        _sharpe_windows = {"30D": 30, "60D": 60, "90D": 90}
+        for _lbl, _win in _sharpe_windows.items():
+            if len(_port_r) < _win + 5:
+                continue
+            _rs = _port_r.rolling(_win).apply(
+                lambda x: (x.mean() - _rf_daily) / (x.std() + 1e-9) * np.sqrt(252),
+                raw=True,
+            ).dropna()
+            _sharpe_fig.add_trace(go.Scatter(
+                x=_rs.index, y=_rs.values, name=_lbl,
+                line=dict(color=_sharpe_colors[_lbl], width=2),
+                hovertemplate=f"<b>{_lbl}</b>: %{{y:.2f}}<extra></extra>",
+            ))
+        _sharpe_fig.add_hline(y=0, line_color="rgba(255,255,255,0.15)", line_dash="dash")
+        _sharpe_fig.add_hline(y=1, line_color="rgba(52,211,153,0.3)", line_dash="dot",
+                              annotation_text="Sharpe = 1",
+                              annotation_font=dict(size=9, color="#34d399", family="DM Mono"),
+                              annotation_position="bottom right")
+        _sharpe_fig.add_hrect(y0=0, y1=50,   fillcolor="rgba(52,211,153,0.03)", line_width=0)
+        _sharpe_fig.add_hrect(y0=-50, y1=0,  fillcolor="rgba(248,113,113,0.03)", line_width=0)
+        _sharpe_fig.update_layout(**PLOTLY_LAYOUT, height=300,
+                                  yaxis_title="Sharpe (anualizado rolling)")
+        st.plotly_chart(_sharpe_fig, use_container_width=True, config=PLOTLY_CONFIG)
+    else:
+        st.info("Sin precios live para calcular rolling Sharpe.")
+
+    # ── RSI + Bandas de Bollinger por acción ──────────────────
+    section("RSI + BANDAS DE BOLLINGER")
+    _bb_tickers = [t for t in tickers if t in prices_df.columns]
+    if _bb_tickers:
+        from plotly.subplots import make_subplots as _make_subplots
+        _col_bb, _ = st.columns([1, 3])
+        with _col_bb:
+            _sel = st.selectbox("Acción:", _bb_tickers, key="bb_ticker_sel")
+        _ps = prices_df[_sel].dropna()
+        if len(_ps) >= 20:
+            _sma20 = _ps.rolling(20).mean()
+            _std20 = _ps.rolling(20).std()
+            _bb_up = _sma20 + 2 * _std20
+            _bb_lo = _sma20 - 2 * _std20
+            _delta = _ps.diff()
+            _gain  = _delta.clip(lower=0).rolling(14).mean()
+            _loss  = (-_delta.clip(upper=0)).rolling(14).mean()
+            _rsi14 = 100 - 100 / (1 + _gain / (_loss + 1e-9))
+
+            _fig_bb = _make_subplots(rows=2, cols=1, row_heights=[0.68, 0.32],
+                                     shared_xaxes=True, vertical_spacing=0.04)
+            # Bollinger fill
+            _fig_bb.add_trace(go.Scatter(
+                x=_bb_up.index, y=_bb_up.values, name="Banda Sup.",
+                line=dict(color="rgba(79,142,247,0.35)", width=1, dash="dot"),
+                showlegend=False), row=1, col=1)
+            _fig_bb.add_trace(go.Scatter(
+                x=_bb_lo.index, y=_bb_lo.values, name="Banda Inf.",
+                fill="tonexty", fillcolor="rgba(79,142,247,0.07)",
+                line=dict(color="rgba(79,142,247,0.35)", width=1, dash="dot"),
+                showlegend=False), row=1, col=1)
+            _fig_bb.add_trace(go.Scatter(
+                x=_sma20.index, y=_sma20.values, name="SMA 20",
+                line=dict(color="rgba(251,191,36,0.7)", width=1.5, dash="dash")),
+                row=1, col=1)
+            _fig_bb.add_trace(go.Scatter(
+                x=_ps.index, y=_ps.values, name=_sel,
+                line=dict(color="#4f8ef7", width=2),
+                hovertemplate=f"<b>{_sel}</b> $%{{y:,.2f}}<extra></extra>"),
+                row=1, col=1)
+            # RSI
+            _fig_bb.add_hrect(y0=70, y1=100, fillcolor="rgba(248,113,113,0.07)",
+                               line_width=0, row=2, col=1)
+            _fig_bb.add_hrect(y0=0,  y1=30,  fillcolor="rgba(52,211,153,0.07)",
+                               line_width=0, row=2, col=1)
+            _fig_bb.add_hline(y=70, line_color="rgba(248,113,113,0.45)",
+                               line_dash="dot", row=2, col=1,
+                               annotation_text="Sobrecompra",
+                               annotation_font=dict(size=9,color="#f87171",family="DM Mono"),
+                               annotation_position="right")
+            _fig_bb.add_hline(y=30, line_color="rgba(52,211,153,0.45)",
+                               line_dash="dot", row=2, col=1,
+                               annotation_text="Sobreventa",
+                               annotation_font=dict(size=9,color="#34d399",family="DM Mono"),
+                               annotation_position="right")
+            _fig_bb.add_trace(go.Scatter(
+                x=_rsi14.index, y=_rsi14.values, name="RSI 14",
+                line=dict(color="#a78bfa", width=1.8),
+                hovertemplate="RSI: %{y:.1f}<extra></extra>"),
+                row=2, col=1)
+            _fig_bb.update_layout(
+                **PLOTLY_LAYOUT, height=520,
+                legend=dict(orientation="h", y=1.04, x=0,
+                            font=dict(size=10, color="#6b7280"),
+                            bgcolor="rgba(0,0,0,0)"),
+            )
+            _fig_bb.update_yaxes(title_text=f"Precio {_sel}", row=1, col=1,
+                                  showgrid=True, gridcolor="rgba(255,255,255,0.04)")
+            _fig_bb.update_yaxes(title_text="RSI", row=2, col=1,
+                                  range=[0,100], showgrid=False)
+            _fig_bb.update_xaxes(showgrid=False)
+            st.plotly_chart(_fig_bb, use_container_width=True, config=PLOTLY_CONFIG)
+
+            # RSI actual
+            _rsi_now = float(_rsi14.dropna().iloc[-1]) if not _rsi14.dropna().empty else None
+            if _rsi_now is not None:
+                _rc = "#f87171" if _rsi_now>70 else ("#34d399" if _rsi_now<30 else "#9ca3af")
+                _rl = "Sobrecompra ↑" if _rsi_now>70 else ("Sobreventa ↓" if _rsi_now<30 else "Neutral")
+                st.markdown(
+                    f"<div style='font-family:DM Mono,monospace;font-size:0.82rem;"
+                    f"color:#6b7280;margin-top:-8px;margin-bottom:12px;'>"
+                    f"RSI actual <b style='color:{_rc};'>{_rsi_now:.1f}</b>"
+                    f" — <span style='color:{_rc};'>{_rl}</span></div>",
+                    unsafe_allow_html=True)
+
     # ── Correlaciones ─────────────────────────────────────────
     section("MATRIZ DE CORRELACIÓN")
     corr_cols = [t for t in tickers if t in returns_df.columns]
@@ -5923,6 +6156,138 @@ def tab_analytics() -> None:
                 title=f"Volatilidad del portafolio: {port_vol*100:.1f}% anual",
             )
             st.plotly_chart(fig_rc, use_container_width=True, config=PLOTLY_CONFIG)
+
+    # ── DCA Calculator ────────────────────────────────────────
+    section("DCA CALCULATOR — APORTACIÓN PERIÓDICA")
+    st.caption("Simula el efecto de agregar capital fijo de forma periódica a tu portafolio actual.")
+    _dca_c1, _dca_c2, _dca_c3 = st.columns(3)
+    with _dca_c1:
+        _dca_amt = st.number_input("Aportación por período ($)", min_value=0.0,
+                                   value=500.0, step=100.0, key="dca_amount")
+    with _dca_c2:
+        _dca_freq = st.selectbox("Frecuencia", ["Mensual","Quincenal","Semanal"],
+                                 key="dca_freq")
+    with _dca_c3:
+        _dca_years = st.slider("Horizonte (años)", 1, 20, 5, key="dca_years")
+
+    if _dca_amt > 0:
+        _freq_map = {"Mensual": 12, "Quincenal": 26, "Semanal": 52}
+        _periods_per_year = _freq_map[_dca_freq]
+        _total_periods = _dca_years * _periods_per_year
+
+        # Usar retorno anualizado histórico del portafolio si está disponible
+        _port_ann_ret = port_metrics.get("Retorno Anualizado", 0.08) if rows else 0.08
+        _port_vol_ann = port_metrics.get("Volatilidad Anual", 0.15) if rows else 0.15
+        _r_per_period = _port_ann_ret / _periods_per_year
+        _vol_per_period = _port_vol_ann / np.sqrt(_periods_per_year)
+
+        # Simulación Monte Carlo (200 paths)
+        np.random.seed(42)
+        _nav_now = sum(
+            hdf.loc[hdf["Ticker"] == t, "Shares"].sum()
+            * _prices_live_an.get(t, {}).get("price", 0)
+            for t in tickers
+        ) if _nav_an > 0 else 0
+
+        _n_paths = 200
+        _paths = np.zeros((_n_paths, _total_periods + 1))
+        _paths[:, 0] = _nav_now
+        for _i in range(1, _total_periods + 1):
+            _shocks = np.random.normal(_r_per_period, _vol_per_period, _n_paths)
+            _paths[:, _i] = _paths[:, _i-1] * (1 + _shocks) + _dca_amt
+
+        _invested = _nav_now + _dca_amt * np.arange(_total_periods + 1)
+        _p10  = np.percentile(_paths, 10, axis=0)
+        _p50  = np.percentile(_paths, 50, axis=0)
+        _p90  = np.percentile(_paths, 90, axis=0)
+        _t_ax = np.arange(_total_periods + 1) / _periods_per_year
+
+        _fig_dca = go.Figure()
+        _fig_dca.add_trace(go.Scatter(
+            x=_t_ax, y=_p90, name="Optimista (P90)",
+            line=dict(color="rgba(52,211,153,0.4)", width=1, dash="dot"),
+            showlegend=True))
+        _fig_dca.add_trace(go.Scatter(
+            x=_t_ax, y=_p10, name="Pesimista (P10)",
+            fill="tonexty", fillcolor="rgba(79,142,247,0.07)",
+            line=dict(color="rgba(248,113,113,0.4)", width=1, dash="dot"),
+            showlegend=True))
+        _fig_dca.add_trace(go.Scatter(
+            x=_t_ax, y=_p50, name="Mediana (P50)",
+            line=dict(color="#4f8ef7", width=2.5)))
+        _fig_dca.add_trace(go.Scatter(
+            x=_t_ax, y=_invested, name="Capital aportado",
+            line=dict(color="#6b7280", width=1.5, dash="dash")))
+        _fig_dca.update_layout(
+            **PLOTLY_LAYOUT, height=360,
+            xaxis_title="Años", yaxis_title="Valor portafolio ($)",
+            yaxis_tickprefix="$",
+        )
+        st.plotly_chart(_fig_dca, use_container_width=True, config=PLOTLY_CONFIG)
+
+        _v50_f = _p50[-1]
+        _v10_f = _p10[-1]
+        _v90_f = _p90[-1]
+        _tot_in = _nav_now + _dca_amt * _total_periods
+        st.markdown(
+            f"<div style='display:flex;gap:28px;font-family:DM Mono,monospace;"
+            f"font-size:0.82rem;color:#6b7280;margin-top:-8px;'>"
+            f"<span>Capital total aportado: <b style='color:#e5e7eb;'>${_tot_in:,.0f}</b></span>"
+            f"<span>Mediana a {_dca_years}A: <b style='color:#4f8ef7;'>${_v50_f:,.0f}</b></span>"
+            f"<span>Rango P10–P90: <b style='color:#34d399;'>${_v10_f:,.0f} – ${_v90_f:,.0f}</b></span>"
+            f"</div>", unsafe_allow_html=True)
+
+    # ── Noticias por ticker ───────────────────────────────────
+    section("NOTICIAS RECIENTES")
+    st.caption("Headlines de Yahoo Finance para tus posiciones actuales.")
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _fetch_news(ticker_list: tuple) -> dict:
+        news_map = {}
+        for _nt in ticker_list:
+            try:
+                _tk = yf.Ticker(_nt)
+                _nws = _tk.news or []
+                news_map[_nt] = _nws[:4]
+            except Exception:
+                news_map[_nt] = []
+        return news_map
+
+    _news_data = _fetch_news(tuple(tickers))
+    _news_cols = st.columns(min(3, len(tickers)))
+    for _ni, _nt in enumerate(tickers):
+        with _news_cols[_ni % len(_news_cols)]:
+            st.markdown(
+                f"<div style='font-family:DM Mono,monospace;font-weight:800;"
+                f"font-size:0.82rem;color:#4f8ef7;margin-bottom:8px;"
+                f"padding:4px 10px;background:rgba(79,142,247,.08);"
+                f"border-radius:6px;display:inline-block;'>{_nt}</div>",
+                unsafe_allow_html=True)
+            _arts = _news_data.get(_nt, [])
+            if _arts:
+                for _art in _arts:
+                    _title = _art.get("title", "Sin título")[:80]
+                    _link  = _art.get("link", "#")
+                    _pub   = _art.get("publisher", "")
+                    _ts    = _art.get("providerPublishTime", 0)
+                    try:
+                        _fecha = datetime.fromtimestamp(_ts).strftime("%d %b") if _ts else ""
+                    except Exception:
+                        _fecha = ""
+                    st.markdown(
+                        f"<div style='margin-bottom:10px;padding:8px 10px;"
+                        f"background:rgba(255,255,255,0.025);border-radius:8px;"
+                        f"border:1px solid rgba(255,255,255,0.05);'>"
+                        f"<a href='{_link}' target='_blank' style='color:#e5e7eb;"
+                        f"font-size:0.78rem;text-decoration:none;line-height:1.4;"
+                        f"display:block;'>{_title}</a>"
+                        f"<div style='font-size:0.65rem;color:#4b5563;"
+                        f"font-family:DM Mono,monospace;margin-top:4px;'>"
+                        f"{_pub} · {_fecha}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True)
+            else:
+                st.caption("Sin noticias disponibles.")
 
 
 # ─────────────────────────────────────────────────────────────
