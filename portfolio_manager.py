@@ -37,7 +37,92 @@ st.set_page_config(
 PORTFOLIO_DIR = "pm_portfolios"
 os.makedirs(PORTFOLIO_DIR, exist_ok=True)
 
+_ANTHROPIC_KEY_FILE = os.path.join(PORTFOLIO_DIR, ".anthropic_key")
+_BANXICO_TOKEN_FILE  = os.path.join(PORTFOLIO_DIR, ".banxico_token")
+
 TRADING_DAYS = 252
+
+
+# ─────────────────────────────────────────────────────────────
+# PERSISTENCIA DE CREDENCIALES
+# ─────────────────────────────────────────────────────────────
+
+def _read_credential(filepath: str) -> str:
+    """Lee una credencial de archivo local o de st.secrets."""
+    try:
+        if os.path.exists(filepath):
+            with open(filepath, "r", encoding="utf-8") as f:
+                val = f.read().strip()
+            if val:
+                return val
+    except Exception:
+        pass
+    return ""
+
+
+def _write_credential(filepath: str, value: str) -> None:
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(value.strip())
+    except Exception:
+        pass
+
+
+def _load_anthropic_key() -> str:
+    # 1. st.secrets (Streamlit Cloud)
+    try:
+        k = st.secrets.get("ANTHROPIC_API_KEY", "")
+        if k:
+            return k
+    except Exception:
+        pass
+    # 2. Archivo local
+    return _read_credential(_ANTHROPIC_KEY_FILE)
+
+
+def _load_banxico_token() -> str:
+    try:
+        k = st.secrets.get("BANXICO_TOKEN", "")
+        if k:
+            return k
+    except Exception:
+        pass
+    return _read_credential(_BANXICO_TOKEN_FILE)
+
+
+# ─────────────────────────────────────────────────────────────
+# TASA LIBRE DE RIESGO — CETES 28D (BANXICO SIE API)
+# ─────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_cetes_rate(token: str) -> tuple[float, str]:
+    """
+    Retorna (tasa_decimal, descripción) de CETES 28 días desde Banxico SIE.
+    Serie SF43936 — tasa de rendimiento anual en porcentaje.
+    Si falla, devuelve (0.09, 'fallback').
+    """
+    if not token:
+        return 0.09, "fallback"
+    try:
+        url = "https://www.banxico.org.mx/SieAPIRest/service/v1/series/SF43936/datos/oportuno"
+        resp = requests.get(
+            url,
+            headers={"Bmx-Token": token},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            series = data.get("bmx", {}).get("series", [])
+            if series:
+                datos = series[0].get("datos", [])
+                if datos:
+                    last = datos[-1]
+                    fecha = last.get("fecha", "")
+                    valor = float(last.get("dato", "9").replace(",", "."))
+                    return round(valor / 100, 6), fecha
+    except Exception:
+        pass
+    return 0.09, "fallback"
 
 # ─────────────────────────────────────────────────────────────
 # ESTILOS CSS  (Aesthetic: terminal financiero refinado)
@@ -1066,7 +1151,7 @@ def init_state() -> None:
         "transactions":   [],
         "target_weights": {},
         "benchmark":      "SPY",
-        "rf_rate":        0.045,
+        "rf_rate":        0.09,
         # thesis: {ticker: {thesis, target_price, exit_date, catalyst, added_date}}
         "thesis":         {},
         # alerts: [{type, ticker, condition, threshold, active}]
@@ -1080,6 +1165,17 @@ def init_state() -> None:
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+    # Auto-cargar credenciales persistidas
+    if not st.session_state.get("anthropic_api_key"):
+        loaded = _load_anthropic_key()
+        if loaded:
+            st.session_state["anthropic_api_key"] = loaded
+
+    if not st.session_state.get("banxico_token"):
+        loaded = _load_banxico_token()
+        if loaded:
+            st.session_state["banxico_token"] = loaded
 
 
 def transactions_df() -> pd.DataFrame:
@@ -7164,11 +7260,13 @@ def sidebar() -> None:
         cleaned = api_key_input.strip().strip('"').strip("'")
         if cleaned.startswith("sk-ant"):
             st.session_state["anthropic_api_key"] = cleaned
+            _write_credential(_ANTHROPIC_KEY_FILE, cleaned)
             st.sidebar.success("✓ Key guardada correctamente")
         elif cleaned:
             st.sidebar.error("La key debe empezar con 'sk-ant-...'")
         else:
             st.session_state["anthropic_api_key"] = ""
+            _write_credential(_ANTHROPIC_KEY_FILE, "")
             st.sidebar.warning("Key borrada")
 
     # Indicador de estado
@@ -7219,14 +7317,66 @@ def sidebar() -> None:
 
     st.sidebar.divider()
 
-    st.sidebar.markdown("#### ⚙️ Configuración Global")
-    rf = st.sidebar.slider(
-        "Tasa libre de riesgo (%)",
-        min_value=0.0, max_value=15.0,
-        value=st.session_state.get("rf_rate", 0.045) * 100,
-        step=0.25,
-    )
-    st.session_state["rf_rate"] = rf / 100
+    # ── Tasa libre de riesgo — CETES 28D (Banxico) ───────────
+    st.sidebar.markdown("#### 🏦 Banxico · CETES 28D")
+    _bnx_token = st.session_state.get("banxico_token", "")
+
+    if _bnx_token:
+        _cetes_rate, _cetes_fecha = fetch_cetes_rate(_bnx_token)
+        st.session_state["rf_rate"] = _cetes_rate
+        _rate_ok = _cetes_fecha != "fallback"
+        if _rate_ok:
+            st.sidebar.markdown(
+                f"<div style='background:rgba(52,211,153,0.07);border:1px solid "
+                f"rgba(52,211,153,0.2);border-radius:10px;padding:10px 12px;'>"
+                f"<div style='font-size:0.6rem;color:#6b7280;font-family:DM Mono,"
+                f"monospace;text-transform:uppercase;letter-spacing:.8px;'>CETES 28D · {_cetes_fecha}</div>"
+                f"<div style='font-size:1.4rem;font-weight:800;color:#34d399;"
+                f"font-family:DM Mono,monospace;letter-spacing:-1px;'>{_cetes_rate*100:.2f}%</div>"
+                f"<div style='font-size:0.68rem;color:#6b7280;font-family:DM Mono,monospace;"
+                f"margin-top:2px;'>Tasa libre de riesgo · Banxico SIE</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.sidebar.warning(f"Banxico no respondió — usando {_cetes_rate*100:.1f}% por defecto.")
+        _preview_bnx = _bnx_token[:6] + "..." + _bnx_token[-4:]
+        st.sidebar.caption(f"Token: `{_preview_bnx}`")
+        if st.sidebar.button("🗑 Cambiar token Banxico", key="_del_bnx",
+                             use_container_width=True):
+            st.session_state["banxico_token"] = ""
+            _write_credential(_BANXICO_TOKEN_FILE, "")
+            st.rerun()
+    else:
+        st.session_state["rf_rate"] = 0.09
+        st.sidebar.markdown(
+            "<div style='background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.18);"
+            "border-radius:10px;padding:10px 12px;font-size:0.78rem;color:#fbbf24;"
+            "font-family:DM Mono,monospace;'>"
+            "Sin token Banxico.<br>"
+            "<span style='color:#6b7280;font-size:0.7rem;'>Usando 9.0% por defecto.</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        _bnx_input = st.sidebar.text_input(
+            "Token Banxico SIE:",
+            placeholder="Pega tu token aquí…",
+            type="password",
+            help="Obtén tu token gratis en banxico.org.mx/SieAPIRest",
+            key="_bnx_raw",
+        )
+        if st.sidebar.button("💾 Guardar token Banxico", key="_save_bnx",
+                             use_container_width=True):
+            _tok = _bnx_input.strip()
+            if len(_tok) > 10:
+                st.session_state["banxico_token"] = _tok
+                _write_credential(_BANXICO_TOKEN_FILE, _tok)
+                fetch_cetes_rate.clear()
+                st.sidebar.success("✓ Token guardado")
+                st.rerun()
+            else:
+                st.sidebar.error("Token demasiado corto.")
+        st.sidebar.caption("👉 banxico.org.mx/SieAPIRest → Obtener token (gratis)")
 
     fx = get_usd_mxn()
     st.sidebar.caption(f"USD/MXN: ${fx:,.2f}")
