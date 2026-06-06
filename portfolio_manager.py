@@ -1655,13 +1655,13 @@ def tab_dashboard() -> None:
             for m in _mn
         )
         return (
-            f'<div style="margin-top:18px;padding-top:14px;'
-            f'border-top:1px solid rgba(255,255,255,0.07);">'
+            f'<div style="background:#111113;border:1px solid rgba(255,255,255,0.08);'
+            f'border-radius:18px;padding:18px 24px 16px;margin-bottom:10px;">'
             f'<div style="font-size:0.58rem;font-weight:700;letter-spacing:1.5px;'
             f'color:#48484a;text-transform:uppercase;font-family:DM Mono,monospace;'
-            f'margin-bottom:8px;">Retornos Mensuales</div>'
+            f'margin-bottom:10px;">Retornos Mensuales</div>'
             f'<table style="border-collapse:separate;border-spacing:3px 0;width:100%;">'
-            f'<thead><tr><th style="width:40px"></th>{header_cells}</tr></thead>'
+            f'<thead><tr><th style="width:36px"></th>{header_cells}</tr></thead>'
             f'<tbody>{rows_html}</tbody>'
             f'</table></div>'
         )
@@ -1742,9 +1742,6 @@ def tab_dashboard() -> None:
 
   <!-- Chips de riesgo -->
   <div style="display:flex;gap:8px;flex-wrap:wrap;">{chips}</div>
-
-  <!-- Mini heatmap de retornos mensuales -->
-  {_build_monthly_hero(_monthly_hero)}
 </div>
 """, unsafe_allow_html=True)
 
@@ -1799,7 +1796,7 @@ def tab_dashboard() -> None:
             if not _bs.empty and _bs.iloc[0] > 0:
                 bench_c = _bs / _bs.iloc[0] * 100
 
-    # ── Retornos mensuales para la mini-tabla del hero ────────
+    # ── Retornos mensuales ────────────────────────────────────
     _monthly_hero: dict[int, dict[int, float]] = {}  # {year: {month: ret}}
     if port_c is not None and len(port_c) > 5:
         _dr_hero = port_c.pct_change().dropna()
@@ -1807,6 +1804,10 @@ def tab_dashboard() -> None:
         for _ts, _rv in _mr_hero.items():
             _y, _m = _ts.year, _ts.month
             _monthly_hero.setdefault(_y, {})[_m] = float(_rv)
+
+    # Renderizar mini heatmap como extensión del hero (misma estética)
+    if _monthly_hero:
+        st.markdown(_build_monthly_hero(_monthly_hero), unsafe_allow_html=True)
 
     col_line, col_donut = st.columns([3, 2], gap="small")
 
