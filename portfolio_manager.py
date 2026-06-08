@@ -7006,7 +7006,9 @@ def _call_claude(prompt: str, max_tokens: int = 2000, system: str = "") -> str:
     Llama al API de Claude con la key configurada en sidebar.
     Retorna el texto de la respuesta o un mensaje de error claro.
     """
-    api_key = st.session_state.get("anthropic_api_key", "").strip()
+    # Siempre leer Secrets primero (fuente más fresca y segura),
+    # con fallback a session_state (entrada del sidebar en local)
+    api_key = (_load_anthropic_key() or st.session_state.get("anthropic_api_key", "")).strip()
 
     if not api_key:
         return (
