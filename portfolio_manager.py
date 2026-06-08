@@ -91,6 +91,184 @@ def _load_banxico_token() -> str:
 
 
 # ─────────────────────────────────────────────────────────────
+# GITHUB GIST — PERSISTENCIA EN LA NUBE
+# No requiere librerías extra: usa requests (ya en requirements).
+# Guarda portafolios Y credenciales (Anthropic, Banxico) en un
+# Gist privado. Al reiniciar la app, todo se restaura solo.
+# ─────────────────────────────────────────────────────────────
+
+_GITHUB_TOKEN_FILE  = os.path.join(PORTFOLIO_DIR, ".github_token")
+_GITHUB_GIST_ID_FILE = os.path.join(PORTFOLIO_DIR, ".github_gist_id")
+_GIST_PF_PREFIX     = "pf_"          # portafolios: pf_NombrePortafolio.json
+_GIST_CREDS_FILE    = "credentials.json"  # tokens: anthropic_key, banxico_token
+
+
+def _load_github_token() -> str:
+    try:
+        k = st.secrets.get("GITHUB_TOKEN", "")
+        if k:
+            return k
+    except Exception:
+        pass
+    return _read_credential(_GITHUB_TOKEN_FILE)
+
+
+def _load_gist_id() -> str:
+    try:
+        k = st.secrets.get("GITHUB_GIST_ID", "")
+        if k:
+            return k
+    except Exception:
+        pass
+    return _read_credential(_GITHUB_GIST_ID_FILE)
+
+
+def _gist_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {_load_github_token()}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def _gist_create() -> str:
+    """Crea un Gist privado nuevo y devuelve su ID."""
+    try:
+        r = requests.post(
+            "https://api.github.com/gists",
+            headers=_gist_headers(),
+            json={
+                "description": "Portfolio Manager — datos persistentes",
+                "public": False,
+                "files": {"README.md": {"content": "Creado automáticamente por Portfolio Manager."}},
+            },
+            timeout=15,
+        )
+        if r.status_code == 201:
+            gid = r.json().get("id", "")
+            _write_credential(_GITHUB_GIST_ID_FILE, gid)
+            return gid
+    except Exception:
+        pass
+    return ""
+
+
+def _gist_get_files() -> dict:
+    """Devuelve el dict de archivos del Gist o {} si falla."""
+    gid = _load_gist_id()
+    if not gid:
+        return {}
+    try:
+        r = requests.get(
+            f"https://api.github.com/gists/{gid}",
+            headers=_gist_headers(),
+            timeout=10,
+        )
+        if r.status_code == 200:
+            return r.json().get("files", {})
+    except Exception:
+        pass
+    return {}
+
+
+def _gist_patch(files_patch: dict) -> bool:
+    """
+    Actualiza archivos en el Gist.
+    files_patch = {"nombre.json": {"content": "..."}}
+    Para borrar: {"nombre.json": None}
+    """
+    gid = _load_gist_id()
+    if not gid or not _load_github_token():
+        return False
+    try:
+        r = requests.patch(
+            f"https://api.github.com/gists/{gid}",
+            headers=_gist_headers(),
+            json={"files": files_patch},
+            timeout=15,
+        )
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def _gist_save_portfolio(name: str, data: dict) -> bool:
+    """Guarda un portafolio en el Gist."""
+    content = json.dumps(data, indent=2, default=str)
+    return _gist_patch({f"{_GIST_PF_PREFIX}{name}.json": {"content": content}})
+
+
+def _gist_delete_portfolio(name: str) -> None:
+    """Elimina un portafolio del Gist."""
+    _gist_patch({f"{_GIST_PF_PREFIX}{name}.json": None})
+
+
+def _gist_save_credentials() -> None:
+    """
+    Persiste en el Gist los tokens actuales (Anthropic, Banxico).
+    Se llama automáticamente cuando el usuario guarda cualquier credencial.
+    """
+    if not _load_gist_id():
+        return
+    creds: dict = {}
+    if ak := _load_anthropic_key():
+        creds["anthropic_key"] = ak
+    if bt := _load_banxico_token():
+        creds["banxico_token"] = bt
+    if creds:
+        _gist_patch({_GIST_CREDS_FILE: {"content": json.dumps(creds)}})
+
+
+def _gist_sync_once() -> None:
+    """
+    Al inicio de la sesión, restaura desde el Gist todo lo que
+    no exista en el sistema de archivos local (efímero en Cloud).
+    Solo se ejecuta UNA vez por sesión.
+    """
+    if st.session_state.get("_gist_synced"):
+        return
+    st.session_state["_gist_synced"] = True
+
+    if not _load_github_token() or not _load_gist_id():
+        return
+
+    files = _gist_get_files()
+    if not files:
+        return
+
+    synced = 0
+    for fname, fdata in files.items():
+        # ── Portafolios ──────────────────────────────────────
+        if fname.startswith(_GIST_PF_PREFIX) and fname.endswith(".json") and fdata:
+            pname = fname[len(_GIST_PF_PREFIX):-5]
+            path  = _portfolio_path(pname)
+            if not os.path.exists(path):
+                try:
+                    data = json.loads(fdata.get("content", "{}"))
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2, default=str)
+                    synced += 1
+                except Exception:
+                    pass
+
+        # ── Credenciales ─────────────────────────────────────
+        if fname == _GIST_CREDS_FILE and fdata:
+            try:
+                creds = json.loads(fdata.get("content", "{}"))
+                if creds.get("anthropic_key") and not _load_anthropic_key():
+                    _write_credential(_ANTHROPIC_KEY_FILE, creds["anthropic_key"])
+                    st.session_state["anthropic_api_key"] = creds["anthropic_key"]
+                if creds.get("banxico_token") and not _load_banxico_token():
+                    _write_credential(_BANXICO_TOKEN_FILE, creds["banxico_token"])
+                    st.session_state["banxico_token"] = creds["banxico_token"]
+            except Exception:
+                pass
+
+    if synced:
+        st.session_state["_gist_sync_count"] = synced
+
+
+# ─────────────────────────────────────────────────────────────
 # TASA LIBRE DE RIESGO — CETES 28D (BANXICO SIE API)
 # ─────────────────────────────────────────────────────────────
 
@@ -794,16 +972,32 @@ def save_portfolio(name: str, transactions: list[dict], target_weights: dict, be
         "perf_custom_start": st.session_state.get("perf_custom_start"),
         "perf_use_custom":   st.session_state.get("perf_use_custom", False),
     }
-    with open(_portfolio_path(name), "w") as f:
+    # 1. Guardar localmente (siempre)
+    with open(_portfolio_path(name), "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, default=str)
+    # 2. Sincronizar al Gist (si está configurado)
+    _gist_save_portfolio(name, data)
 
 
 def load_portfolio(name: str) -> dict | None:
     path = _portfolio_path(name)
-    if not os.path.exists(path):
+    data = None
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    else:
+        # Intentar desde el Gist (el archivo local se borró al reiniciar Cloud)
+        files = _gist_get_files()
+        fname = f"{_GIST_PF_PREFIX}{name}.json"
+        if fname in files and files[fname]:
+            try:
+                data = json.loads(files[fname].get("content", "{}"))
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, default=str)
+            except Exception:
+                data = None
+    if data is None:
         return None
-    with open(path) as f:
-        data = json.load(f)
     # Backward-compat: archivos viejos usaban "holdings" como posiciones agregadas
     if "transactions" not in data and "holdings" in data:
         migrated = []
@@ -821,6 +1015,8 @@ def load_portfolio(name: str) -> dict | None:
 
 
 def list_portfolios() -> list[str]:
+    # Sincronizar desde Gist una vez por sesión (restaura archivos tras reinicio)
+    _gist_sync_once()
     return sorted(
         f.replace(".json", "")
         for f in os.listdir(PORTFOLIO_DIR)
@@ -832,6 +1028,8 @@ def delete_portfolio(name: str) -> None:
     path = _portfolio_path(name)
     if os.path.exists(path):
         os.remove(path)
+    # Eliminar también del Gist
+    _gist_delete_portfolio(name)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -7849,6 +8047,7 @@ def sidebar() -> None:
         if cleaned.startswith("sk-ant"):
             st.session_state["anthropic_api_key"] = cleaned
             _write_credential(_ANTHROPIC_KEY_FILE, cleaned)
+            _gist_save_credentials()   # sincronizar al Gist
             st.sidebar.success("✓ Key guardada correctamente")
         elif cleaned:
             st.sidebar.error("La key debe empezar con 'sk-ant-...'")
@@ -7902,6 +8101,80 @@ def sidebar() -> None:
                     st.sidebar.error(f"Error de red: {ex}")
     else:
         st.sidebar.caption("Sin API Key — análisis IA no disponible.")
+
+    st.sidebar.divider()
+
+    # ── GitHub Gist — Persistencia en la nube ────────────────
+    st.sidebar.markdown("#### ☁️ GitHub · Nube")
+    _gh_token = _load_github_token()
+    _gh_gist_id = _load_gist_id()
+
+    if _gh_token and _gh_gist_id:
+        # Contar portafolios en el Gist
+        _gist_files = _gist_get_files()
+        _pf_count = sum(1 for f in _gist_files if f.startswith(_GIST_PF_PREFIX))
+        _creds_ok  = _GIST_CREDS_FILE in _gist_files
+        st.sidebar.markdown(
+            f"<div style='background:rgba(48,209,88,0.07);border:1px solid "
+            f"rgba(48,209,88,0.2);border-radius:10px;padding:10px 12px;'>"
+            f"<div style='font-size:0.6rem;color:#8e8e93;font-family:DM Mono,monospace;"
+            f"text-transform:uppercase;letter-spacing:.8px;'>GITHUB GIST · CONECTADO</div>"
+            f"<div style='font-size:1rem;font-weight:700;color:#30d158;"
+            f"font-family:DM Mono,monospace;margin-top:3px;'>"
+            f"✓ {_pf_count} portafolio{'s' if _pf_count != 1 else ''}"
+            f"{'  ·  🔑 tokens' if _creds_ok else ''}</div>"
+            f"<div style='font-size:0.68rem;color:#8e8e93;font-family:DM Mono,monospace;"
+            f"margin-top:2px;'>Todo persiste al reiniciar la app</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        _sync_n = st.session_state.pop("_gist_sync_count", 0)
+        if _sync_n:
+            st.sidebar.success(f"☁️ {_sync_n} portafolio(s) restaurado(s) desde GitHub")
+        if st.sidebar.button("🗑 Cambiar token GitHub", key="_del_gh",
+                             use_container_width=True):
+            _write_credential(_GITHUB_TOKEN_FILE, "")
+            _write_credential(_GITHUB_GIST_ID_FILE, "")
+            st.session_state.pop("_gist_synced", None)
+            st.rerun()
+    elif _gh_token and not _gh_gist_id:
+        # Token OK pero sin Gist — crearlo automáticamente
+        st.sidebar.info("Token válido — creando Gist...")
+        _new_id = _gist_create()
+        if _new_id:
+            st.sidebar.success("✓ Gist creado automáticamente")
+            st.rerun()
+        else:
+            st.sidebar.error("No se pudo crear el Gist. Verifica el token.")
+    else:
+        st.sidebar.markdown(
+            "<div style='background:rgba(255,214,10,0.06);border:1px solid rgba(255,214,10,0.18);"
+            "border-radius:10px;padding:10px 12px;font-size:0.78rem;color:#ffd60a;"
+            "font-family:DM Mono,monospace;'>"
+            "Sin GitHub — los datos se pierden al reiniciar.<br>"
+            "<span style='color:#8e8e93;font-size:0.7rem;'>Agrega tu token para persistencia automática.</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        with st.sidebar.expander("⚙️ Configurar GitHub", expanded=False):
+            _gh_input = st.text_input(
+                "Personal Access Token:",
+                placeholder="ghp_xxxxxxxxxxxx",
+                type="password",
+                key="_gh_tok_in",
+                help="Necesita scope: gist",
+            )
+            if st.button("💾 Guardar y conectar", key="_save_gh",
+                         use_container_width=True):
+                _t = _gh_input.strip()
+                if _t.startswith("ghp_") or _t.startswith("github_pat_"):
+                    _write_credential(_GITHUB_TOKEN_FILE, _t)
+                    st.session_state.pop("_gist_synced", None)
+                    st.success("✓ Token guardado — creando Gist...")
+                    st.rerun()
+                else:
+                    st.error("El token debe empezar con ghp_ o github_pat_")
+            st.caption("👉 github.com → Settings → Developer settings → Personal access tokens → scope: **gist**")
 
     st.sidebar.divider()
 
@@ -7960,6 +8233,7 @@ def sidebar() -> None:
                 st.session_state["banxico_token"] = _tok
                 _write_credential(_BANXICO_TOKEN_FILE, _tok)
                 fetch_cetes_rate.clear()
+                _gist_save_credentials()   # sincronizar al Gist
                 st.sidebar.success("✓ Token guardado")
                 st.rerun()
             else:
