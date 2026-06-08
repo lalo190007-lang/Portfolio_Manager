@@ -8025,74 +8025,39 @@ def sidebar() -> None:
 
     # ── API Key de Anthropic ──────────────────────────────────
     st.sidebar.markdown("#### 🤖 Claude AI")
+    _ak_from_secrets = bool(_load_anthropic_key())
 
-    api_key_input = st.sidebar.text_input(
-        "Anthropic API Key:",
-        value=st.session_state.get("anthropic_api_key", ""),
-        type="password",
-        placeholder="sk-ant-api03-...",
-        help="Pega tu key y presiona Guardar. Empieza con 'sk-ant-'.",
-        key="_api_key_raw",
-    )
-
-    if st.sidebar.button("🔑 Guardar API Key", use_container_width=True, key="_save_key"):
-        cleaned = api_key_input.strip().strip('"').strip("'")
-        if cleaned.startswith("sk-ant"):
-            st.session_state["anthropic_api_key"] = cleaned
-            _write_credential(_ANTHROPIC_KEY_FILE, cleaned)
-            st.sidebar.success("✓ Key guardada correctamente")
-        elif cleaned:
-            st.sidebar.error("La key debe empezar con 'sk-ant-...'")
-        else:
-            st.session_state["anthropic_api_key"] = ""
-            _write_credential(_ANTHROPIC_KEY_FILE, "")
-            st.sidebar.warning("Key borrada")
-
-    # Indicador de estado
-    stored = st.session_state.get("anthropic_api_key", "")
-    if stored:
-        preview = stored[:12] + "..." + stored[-4:]
-        st.sidebar.caption(f"Key guardada: `{preview}`")
-
-        # Botón de prueba
-        if st.sidebar.button("🧪 Probar conexión", use_container_width=True,
-                             key="_test_key"):
-            with st.sidebar.status("Probando…"):
-                try:
-                    import requests as _req
-                    r = _req.post(
-                        "https://api.anthropic.com/v1/messages",
-                        headers={
-                            "Content-Type":      "application/json",
-                            "x-api-key":         stored.strip(),
-                            "anthropic-version": "2023-06-01",
-                        },
-                        json={
-                            "model":      "claude-sonnet-4-20250514",
-                            "max_tokens": 5,
-                            "messages":   [{"role":"user","content":"hi"}],
-                        },
-                        timeout=15,
-                    )
-                    if r.status_code == 200:
-                        st.sidebar.success("✅ ¡Conexión exitosa! La key funciona.")
-                    else:
-                        body = r.json()
-                        err_msg = body.get("error",{}).get("message", r.text[:200])
-                        st.sidebar.error(f"Error {r.status_code}: {err_msg}")
-                        if r.status_code == 401:
-                            st.sidebar.warning(
-                                "**Key inválida.** Verifica que:\n"
-                                "1. La copiaste completa desde console.anthropic.com\n"
-                                "2. Empieza con `sk-ant-`\n"
-                                "3. No tiene espacios al inicio o al final"
-                            )
-                        elif r.status_code == 403:
-                            st.sidebar.warning("Sin créditos o cuenta no activada.")
-                except Exception as ex:
-                    st.sidebar.error(f"Error de red: {ex}")
+    if _ak_from_secrets:
+        # Viene de Streamlit Secrets — solo mostrar estado
+        st.sidebar.markdown(
+            "<div style='background:rgba(48,209,88,0.07);border:1px solid rgba(48,209,88,0.2);"
+            "border-radius:10px;padding:8px 12px;font-size:0.78rem;color:#30d158;"
+            "font-family:DM Mono,monospace;'>✓ API Key configurada via Secrets</div>",
+            unsafe_allow_html=True,
+        )
     else:
-        st.sidebar.caption("Sin API Key — análisis IA no disponible.")
+        # Sin Secrets — mostrar input (útil en local)
+        api_key_input = st.sidebar.text_input(
+            "Anthropic API Key:",
+            value=st.session_state.get("anthropic_api_key", ""),
+            type="password",
+            placeholder="sk-ant-api03-...",
+            help="Solo necesario si corres la app localmente.",
+            key="_api_key_raw",
+        )
+        if st.sidebar.button("💾 Guardar API Key", use_container_width=True, key="_save_key"):
+            cleaned = api_key_input.strip().strip('"').strip("'")
+            if cleaned.startswith("sk-ant"):
+                st.session_state["anthropic_api_key"] = cleaned
+                _write_credential(_ANTHROPIC_KEY_FILE, cleaned)
+                st.sidebar.success("✓ Key guardada")
+            elif cleaned:
+                st.sidebar.error("Debe empezar con 'sk-ant-...'")
+            else:
+                st.session_state["anthropic_api_key"] = ""
+                _write_credential(_ANTHROPIC_KEY_FILE, "")
+                st.sidebar.warning("Key borrada")
+        st.sidebar.caption("En producción usa Streamlit Secrets.")
 
     st.sidebar.divider()
 
@@ -8172,7 +8137,8 @@ def sidebar() -> None:
 
     # ── Tasa libre de riesgo — CETES 28D (Banxico) ───────────
     st.sidebar.markdown("#### 🏦 Banxico · CETES 28D")
-    _bnx_token = st.session_state.get("banxico_token", "")
+    _bnx_token = _load_banxico_token() or st.session_state.get("banxico_token", "")
+    _bnx_from_secrets = bool(_load_banxico_token())
 
     if _bnx_token:
         _cetes_rate, _cetes_fecha = fetch_cetes_rate(_bnx_token)
@@ -8182,54 +8148,54 @@ def sidebar() -> None:
             st.sidebar.markdown(
                 f"<div style='background:rgba(48,209,88,0.07);border:1px solid "
                 f"rgba(48,209,88,0.2);border-radius:10px;padding:10px 12px;'>"
-                f"<div style='font-size:0.6rem;color:#8e8e93;font-family:DM Mono,"
-                f"monospace;text-transform:uppercase;letter-spacing:.8px;'>CETES 28D · {_cetes_fecha}</div>"
+                f"<div style='font-size:0.6rem;color:#8e8e93;font-family:DM Mono,monospace;"
+                f"text-transform:uppercase;letter-spacing:.8px;'>CETES 28D · {_cetes_fecha}</div>"
                 f"<div style='font-size:1.4rem;font-weight:800;color:#30d158;"
                 f"font-family:DM Mono,monospace;letter-spacing:-1px;'>{_cetes_rate*100:.2f}%</div>"
                 f"<div style='font-size:0.68rem;color:#8e8e93;font-family:DM Mono,monospace;"
-                f"margin-top:2px;'>Tasa libre de riesgo · Banxico SIE</div>"
+                f"margin-top:2px;'>{'via Secrets' if _bnx_from_secrets else 'Tasa libre de riesgo'} · Banxico SIE</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
         else:
             st.sidebar.warning(f"Banxico no respondió — usando {_cetes_rate*100:.1f}% por defecto.")
-        _preview_bnx = _bnx_token[:6] + "..." + _bnx_token[-4:]
-        st.sidebar.caption(f"Token: `{_preview_bnx}`")
-        if st.sidebar.button("🗑 Cambiar token Banxico", key="_del_bnx",
-                             use_container_width=True):
-            st.session_state["banxico_token"] = ""
-            _write_credential(_BANXICO_TOKEN_FILE, "")
-            st.rerun()
+        # Solo mostrar botón de cambio si NO viene de Secrets
+        if not _bnx_from_secrets:
+            if st.sidebar.button("🗑 Cambiar token Banxico", key="_del_bnx",
+                                 use_container_width=True):
+                st.session_state["banxico_token"] = ""
+                _write_credential(_BANXICO_TOKEN_FILE, "")
+                st.rerun()
     else:
         st.session_state["rf_rate"] = 0.09
         st.sidebar.markdown(
             "<div style='background:rgba(255,214,10,0.06);border:1px solid rgba(255,214,10,0.18);"
             "border-radius:10px;padding:10px 12px;font-size:0.78rem;color:#ffd60a;"
             "font-family:DM Mono,monospace;'>"
-            "Sin token Banxico.<br>"
-            "<span style='color:#8e8e93;font-size:0.7rem;'>Usando 9.0% por defecto.</span>"
+            "Sin token Banxico — usando 9.0% por defecto.<br>"
+            "<span style='color:#8e8e93;font-size:0.7rem;'>Agrega BANXICO_TOKEN en Streamlit Secrets.</span>"
             "</div>",
             unsafe_allow_html=True,
         )
-        _bnx_input = st.sidebar.text_input(
-            "Token Banxico SIE:",
-            placeholder="Pega tu token aquí…",
-            type="password",
-            help="Obtén tu token gratis en banxico.org.mx/SieAPIRest",
-            key="_bnx_raw",
-        )
-        if st.sidebar.button("💾 Guardar token Banxico", key="_save_bnx",
-                             use_container_width=True):
-            _tok = _bnx_input.strip()
-            if len(_tok) > 10:
-                st.session_state["banxico_token"] = _tok
-                _write_credential(_BANXICO_TOKEN_FILE, _tok)
-                fetch_cetes_rate.clear()
-                st.sidebar.success("✓ Token guardado")
-                st.rerun()
-            else:
-                st.sidebar.error("Token demasiado corto.")
-        st.sidebar.caption("👉 banxico.org.mx/SieAPIRest → Obtener token (gratis)")
+        # Input solo para uso local
+        with st.sidebar.expander("⚙️ Configurar token (local)", expanded=False):
+            _bnx_input = st.text_input(
+                "Token Banxico SIE:",
+                placeholder="Pega tu token aquí…",
+                type="password",
+                key="_bnx_raw",
+            )
+            if st.button("💾 Guardar", key="_save_bnx", use_container_width=True):
+                _tok = _bnx_input.strip()
+                if len(_tok) > 10:
+                    st.session_state["banxico_token"] = _tok
+                    _write_credential(_BANXICO_TOKEN_FILE, _tok)
+                    fetch_cetes_rate.clear()
+                    st.success("✓ Token guardado")
+                    st.rerun()
+                else:
+                    st.error("Token demasiado corto.")
+            st.caption("👉 banxico.org.mx/SieAPIRest → Obtener token (gratis)")
 
     fx = get_usd_mxn()
     st.sidebar.caption(f"USD/MXN: ${fx:,.2f}")
