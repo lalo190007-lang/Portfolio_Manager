@@ -1,0 +1,34 @@
+# ── Datos locales sensibles — NUNCA subir al repo ──────────
+pm_portfolios/
+.env
+*.env
+
+# ── Python ─────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Entornos virtuales ──────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+
+# ── Streamlit cache local ───────────────────────────────────
+.streamlit/secrets.toml
+
+# ── OS ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDEs ────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
