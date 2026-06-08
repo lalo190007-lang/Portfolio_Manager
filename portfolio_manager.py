@@ -912,6 +912,59 @@ def fetch_pulse_data(tickers: list[str]) -> dict:
     return result
 
 
+@st.cache_data(ttl=7200, show_spinner=False)
+def fetch_events_data(tickers: tuple) -> dict:
+    """
+    Obtiene earnings dates y datos de dividendos para cada ticker.
+    Retorna dict: {ticker: {next_earnings, div_yield, annual_div, next_ex_date, last_div}}
+    TTL = 2h (los eventos no cambian con frecuencia).
+    """
+    result = {}
+    for t in tickers:
+        entry = {"next_earnings": None, "div_yield": 0.0,
+                 "annual_div": 0.0, "next_ex_date": None, "last_div": 0.0}
+        try:
+            tk = yf.Ticker(t)
+            # ── Earnings date ──────────────────────────────────────
+            try:
+                cal = tk.calendar
+                if cal is not None:
+                    ed = None
+                    if isinstance(cal, dict):
+                        ed = cal.get("Earnings Date")
+                        if hasattr(ed, "__iter__") and not isinstance(ed, str):
+                            ed = list(ed)[0] if ed else None
+                    elif hasattr(cal, "columns") and "Earnings Date" in cal.columns:
+                        ed = cal["Earnings Date"].iloc[0] if not cal.empty else None
+                    elif hasattr(cal, "index") and "Earnings Date" in cal.index:
+                        val = cal.loc["Earnings Date"]
+                        ed = val.iloc[0] if hasattr(val, "iloc") else val
+                    if ed is not None:
+                        entry["next_earnings"] = pd.Timestamp(ed)
+            except Exception:
+                pass
+            # ── Dividend info ──────────────────────────────────────
+            try:
+                info = tk.info or {}
+                entry["div_yield"]  = float(info.get("dividendYield") or 0)
+                entry["annual_div"] = float(info.get("dividendRate")  or 0)
+                ex_ts = info.get("exDividendDate")
+                if ex_ts:
+                    entry["next_ex_date"] = datetime.fromtimestamp(int(ex_ts))
+            except Exception:
+                pass
+            try:
+                divs = tk.dividends
+                if not divs.empty:
+                    entry["last_div"] = float(divs.iloc[-1])
+            except Exception:
+                pass
+        except Exception:
+            pass
+        result[t] = entry
+    return result
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_history(tickers: list[str], start: str, end: str) -> pd.DataFrame:
     """Descarga histórico de precios de cierre (ajustados)."""
@@ -962,6 +1015,7 @@ def save_portfolio(name: str, transactions: list[dict], target_weights: dict, be
         "extra_benchmarks":  st.session_state.get("extra_benchmarks", []),
         "perf_custom_start": st.session_state.get("perf_custom_start"),
         "perf_use_custom":   st.session_state.get("perf_use_custom", False),
+        "watchlist":         st.session_state.get("watchlist", []),
     }
     # 1. Guardar localmente (siempre)
     with open(_portfolio_path(name), "w", encoding="utf-8") as f:
@@ -1413,6 +1467,7 @@ def init_state() -> None:
         # custom performance start date (persisted per portfolio)
         "perf_custom_start": None,
         "perf_use_custom":   False,
+        "watchlist":         [],
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -2658,6 +2713,108 @@ def tab_dashboard() -> None:
 """, unsafe_allow_html=True)
 
     # ═══════════════════════════════════════════════════════════
+    # SECCIÓN 4.5: EARNINGS CALENDAR + DIVIDENDOS
+    # ═══════════════════════════════════════════════════════════
+    section("PRÓXIMOS EVENTOS")
+    _evts = fetch_events_data(tuple(sorted(tickers)))
+    _today = datetime.today().date()
+    _col_earn, _col_div = st.columns(2, gap="small")
+
+    with _col_earn:
+        st.markdown(
+            "<div style='font-size:0.7rem;font-weight:700;color:#aeaeb2;"
+            "letter-spacing:1px;text-transform:uppercase;font-family:DM Mono,monospace;"
+            "margin-bottom:10px;'>📅 Earnings</div>",
+            unsafe_allow_html=True,
+        )
+        _earn_rows = []
+        for _t, _ev in _evts.items():
+            _ne = _ev.get("next_earnings")
+            if _ne is None:
+                continue
+            try:
+                _nd = _ne.date() if hasattr(_ne, "date") else _ne
+                _days = (_nd - _today).days
+                _earn_rows.append((_t, _nd, _days))
+            except Exception:
+                pass
+        _earn_rows.sort(key=lambda x: x[2])
+        if _earn_rows:
+            for _et, _ed, _dd in _earn_rows:
+                if _dd < -7:
+                    continue
+                if _dd < 0:
+                    _clr, _badge = "#636366", f"Hace {abs(_dd)}d"
+                elif _dd == 0:
+                    _clr, _badge = "#ff453a", "¡Hoy!"
+                elif _dd <= 7:
+                    _clr, _badge = "#ffd60a", f"En {_dd}d"
+                else:
+                    _clr, _badge = "#0a84ff", f"En {_dd}d"
+                st.markdown(
+                    f"<div style='display:flex;justify-content:space-between;"
+                    f"align-items:center;padding:8px 12px;"
+                    f"background:rgba(255,255,255,0.03);border-radius:10px;"
+                    f"border:1px solid rgba(255,255,255,0.06);margin-bottom:5px;'>"
+                    f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;"
+                    f"color:#fff;font-weight:600;'>{_et}</span>"
+                    f"<div style='text-align:right;'>"
+                    f"<div style='font-family:DM Mono,monospace;font-size:0.78rem;"
+                    f"color:{_clr};font-weight:700;'>{_badge}</div>"
+                    f"<div style='font-size:0.62rem;color:#636366;'>"
+                    f"{_ed.strftime('%d %b %Y')}</div></div></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption("Sin earnings próximos disponibles.")
+
+    with _col_div:
+        st.markdown(
+            "<div style='font-size:0.7rem;font-weight:700;color:#aeaeb2;"
+            "letter-spacing:1px;text-transform:uppercase;font-family:DM Mono,monospace;"
+            "margin-bottom:10px;'>💰 Dividendos</div>",
+            unsafe_allow_html=True,
+        )
+        _div_rows = [(t, e) for t, e in _evts.items() if e.get("annual_div", 0) > 0]
+        _total_annual_income = 0.0
+        if _div_rows:
+            for _dt, _de in _div_rows:
+                _dy   = _de.get("div_yield", 0) * 100
+                _ann  = _de.get("annual_div", 0)
+                _ex   = _de.get("next_ex_date")
+                _ex_s = _ex.strftime("%d %b") if _ex else "—"
+                _sh   = float(hdf.loc[hdf["Ticker"] == _dt, "Shares"].sum()) if not hdf.empty else 0
+                _inc  = _sh * _ann
+                _total_annual_income += _inc
+                st.markdown(
+                    f"<div style='padding:8px 12px;background:rgba(255,255,255,0.03);"
+                    f"border-radius:10px;border:1px solid rgba(255,255,255,0.06);"
+                    f"margin-bottom:5px;'>"
+                    f"<div style='display:flex;justify-content:space-between;'>"
+                    f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;"
+                    f"color:#fff;font-weight:600;'>{_dt}</span>"
+                    f"<span style='font-family:DM Mono,monospace;font-size:0.82rem;"
+                    f"color:#30d158;font-weight:700;'>{_dy:.2f}%</span></div>"
+                    f"<div style='display:flex;gap:14px;margin-top:3px;'>"
+                    f"<span style='font-size:0.65rem;color:#636366;'>${_ann:.2f}/acción</span>"
+                    f"<span style='font-size:0.65rem;color:#636366;'>Ex-div: {_ex_s}</span>"
+                    + (f"<span style='font-size:0.65rem;color:#8e8e93;'>Ingreso: ${_inc:.2f}/año</span>" if _inc > 0 else "")
+                    + f"</div></div>",
+                    unsafe_allow_html=True,
+                )
+            if _total_annual_income > 0:
+                st.markdown(
+                    f"<div style='margin-top:6px;padding:6px 12px;"
+                    f"background:rgba(48,209,88,0.06);border-radius:8px;"
+                    f"border:1px solid rgba(48,209,88,0.15);font-family:DM Mono,monospace;"
+                    f"font-size:0.75rem;color:#30d158;'>"
+                    f"Total ingreso anual: <b>${_total_annual_income:.2f}</b></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption("Ninguna posición paga dividendos.")
+
+    # ═══════════════════════════════════════════════════════════
     # SECCIÓN 5: ACTIVIDAD RECIENTE (HTML auto-contenido)
     # ═══════════════════════════════════════════════════════════
     txns = transactions_df()
@@ -2890,6 +3047,7 @@ def tab_editor() -> None:
                         st.session_state["extra_benchmarks"] = data.get("extra_benchmarks", [])
                         st.session_state["perf_custom_start"]= data.get("perf_custom_start")
                         st.session_state["perf_use_custom"]  = data.get("perf_use_custom", False)
+                        st.session_state["watchlist"]        = data.get("watchlist", [])
                         st.success(f"Cargado: {sel}")
                         st.rerun()
         with c2:
@@ -6701,6 +6859,122 @@ def tab_analytics() -> None:
             else:
                 st.caption("Sin noticias disponibles.")
 
+    # ── Stress Test ───────────────────────────────────────────
+    section("STRESS TEST — ESCENARIOS DE CAÍDA")
+    st.caption("Simula el impacto en tu portafolio ante distintos choques de mercado.")
+
+    _stress_presets = {
+        "Corrección leve  –10%": -0.10,
+        "Corrección media –20%": -0.20,
+        "Bear market      –40%": -0.40,
+        "Crash severo     –60%": -0.60,
+    }
+    _sc1, _sc2, _sc3 = st.columns([3, 1, 1])
+    with _sc1:
+        _st_preset = st.select_slider(
+            "Escenario:", options=list(_stress_presets.keys()),
+            value="Corrección media –20%", key="stress_preset",
+        )
+    with _sc2:
+        _st_custom = st.number_input(
+            "% personalizado:", min_value=-95, max_value=-1,
+            value=-20, step=5, key="stress_custom_pct",
+        )
+    with _sc3:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        _use_custom_st = st.toggle("Usar %", key="stress_use_custom")
+
+    _shock_pct = (_st_custom / 100) if _use_custom_st else _stress_presets[_st_preset]
+    _beta_adj  = st.toggle("Ajustar por Beta (más realista)", key="stress_beta_adj", value=True)
+
+    # Obtener precios actuales y calcular impacto
+    _st_prices = fetch_live_prices(tuple(sorted(tickers)))
+    _st_rows = []
+    _st_curr_total = 0.0
+    _st_stress_total = 0.0
+
+    for _, _row in hdf.iterrows():
+        _tk = _row["Ticker"]
+        _sh = float(_row.get("Shares", 0))
+        _px = _st_prices.get(_tk, {}).get("price", 0)
+        if _px <= 0 or _sh <= 0:
+            continue
+        _curr_val = _sh * _px
+        # Beta ajustado (usa info de yfinance, fallback a 1.0)
+        _beta = 1.0
+        if _beta_adj:
+            try:
+                _beta = float(yf.Ticker(_tk).info.get("beta") or 1.0)
+                _beta = max(0.1, min(_beta, 3.0))  # clamp
+            except Exception:
+                _beta = 1.0
+        _adj_shock = _shock_pct * _beta
+        _stress_val = _curr_val * (1 + _adj_shock)
+        _loss       = _stress_val - _curr_val
+        _st_curr_total   += _curr_val
+        _st_stress_total += _stress_val
+        _st_rows.append({
+            "Ticker": _tk,
+            "Valor actual": _curr_val,
+            "Beta": round(_beta, 2),
+            "Choque adj.": f"{_adj_shock:.1%}",
+            "Valor estresado": _stress_val,
+            "Impacto ($)": _loss,
+            "Impacto (%)": _adj_shock,
+        })
+
+    if _st_rows:
+        _st_total_loss = _st_stress_total - _st_curr_total
+        _st_pct_loss   = _st_total_loss / _st_curr_total if _st_curr_total else 0
+
+        # KPIs principales
+        _sk1, _sk2, _sk3 = st.columns(3)
+        with _sk1:
+            kpi_card("Valor actual", f"${_st_curr_total:,.2f}")
+        with _sk2:
+            kpi_card("Valor estresado", f"${_st_stress_total:,.2f}", accent="#ff453a")
+        with _sk3:
+            kpi_card("Pérdida estimada", f"${_st_total_loss:,.2f}",
+                     f"{_st_pct_loss:.1%}", accent="#ff453a")
+
+        # Tabla por posición
+        _st_df = pd.DataFrame(_st_rows).sort_values("Impacto ($)")
+        _st_html_rows = ""
+        for _, _r in _st_df.iterrows():
+            _imp_clr = "#ff453a" if _r["Impacto ($)"] < 0 else "#30d158"
+            _st_html_rows += (
+                f"<tr style='border-bottom:1px solid rgba(255,255,255,0.04);'>"
+                f"<td style='padding:7px 10px;font-family:DM Mono,monospace;font-size:0.8rem;"
+                f"color:#fff;font-weight:600;'>{_r['Ticker']}</td>"
+                f"<td style='padding:7px 10px;text-align:right;font-family:DM Mono,monospace;"
+                f"font-size:0.78rem;color:#aeaeb2;'>${_r['Valor actual']:,.2f}</td>"
+                f"<td style='padding:7px 10px;text-align:center;font-family:DM Mono,monospace;"
+                f"font-size:0.78rem;color:#8e8e93;'>{_r['Beta']}</td>"
+                f"<td style='padding:7px 10px;text-align:right;font-family:DM Mono,monospace;"
+                f"font-size:0.78rem;color:{_imp_clr};font-weight:600;'>{_r['Impacto ($)']:+,.2f}</td>"
+                f"<td style='padding:7px 10px;text-align:right;font-family:DM Mono,monospace;"
+                f"font-size:0.78rem;color:{_imp_clr};'>{_r['Impacto (%)']:.1%}</td>"
+                f"</tr>"
+            )
+        st.markdown(
+            f"<table style='width:100%;border-collapse:collapse;'>"
+            f"<thead><tr style='border-bottom:1px solid rgba(255,255,255,0.1);'>"
+            f"<th style='padding:6px 10px;text-align:left;font-size:0.65rem;color:#636366;"
+            f"text-transform:uppercase;font-family:DM Mono,monospace;'>Ticker</th>"
+            f"<th style='padding:6px 10px;text-align:right;font-size:0.65rem;color:#636366;"
+            f"text-transform:uppercase;font-family:DM Mono,monospace;'>Valor</th>"
+            f"<th style='padding:6px 10px;text-align:center;font-size:0.65rem;color:#636366;"
+            f"text-transform:uppercase;font-family:DM Mono,monospace;'>Beta</th>"
+            f"<th style='padding:6px 10px;text-align:right;font-size:0.65rem;color:#636366;"
+            f"text-transform:uppercase;font-family:DM Mono,monospace;'>Impacto $</th>"
+            f"<th style='padding:6px 10px;text-align:right;font-size:0.65rem;color:#636366;"
+            f"text-transform:uppercase;font-family:DM Mono,monospace;'>Impacto %</th>"
+            f"</tr></thead><tbody>{_st_html_rows}</tbody></table>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("Sin posiciones para calcular el stress test.")
+
 
 # ─────────────────────────────────────────────────────────────
 # SIDEBAR
@@ -8317,6 +8591,84 @@ def tab_market_overview() -> None:
   <span style="font-family:DM Mono,monospace;font-weight:700;color:{clr};">
     {arr} {abs(chg):.2%}</span>
 </div>""", unsafe_allow_html=True)
+
+    # ── Watchlist ──────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    section("WATCHLIST")
+
+    # Input para agregar tickers
+    _wl_c1, _wl_c2 = st.columns([3, 1])
+    with _wl_c1:
+        _wl_new = st.text_input("Agregar ticker:", placeholder="AAPL, MSFT, GOOGL…",
+                                 key="_wl_add_input", label_visibility="collapsed")
+    with _wl_c2:
+        if st.button("➕ Agregar", key="_wl_add_btn", use_container_width=True):
+            _wl_items = [t.strip().upper() for t in _wl_new.replace(",", " ").split() if t.strip()]
+            _wl_curr  = st.session_state.get("watchlist", [])
+            _added = 0
+            for _wt in _wl_items:
+                if _wt and _wt not in _wl_curr:
+                    _wl_curr.append(_wt)
+                    _added += 1
+            st.session_state["watchlist"] = _wl_curr
+            if _added:
+                # Persistir en portafolio actual
+                _wl_pname = st.session_state.get("portfolio_name", "")
+                if _wl_pname:
+                    save_portfolio(_wl_pname,
+                                   st.session_state.get("transactions", []),
+                                   st.session_state.get("target_weights", {}),
+                                   st.session_state.get("benchmark", "SPY"))
+                st.rerun()
+
+    _watchlist = st.session_state.get("watchlist", [])
+
+    if _watchlist:
+        with st.spinner("Cargando watchlist…"):
+            _wl_prices = fetch_live_prices(tuple(sorted(_watchlist)))
+
+        _wl_cols = st.columns(min(len(_watchlist), 4))
+        _to_remove = []
+        for _wi, _wt in enumerate(_watchlist):
+            _winf  = _wl_prices.get(_wt, {})
+            _wpx   = _winf.get("price",      0.0)
+            _wpv   = _winf.get("prev_close", 0.0)
+            _wchg  = (_wpx - _wpv) / _wpv if _wpv > 0 else 0.0
+            _wclr  = "#30d158" if _wchg >= 0 else "#ff453a"
+            _warr  = "▲" if _wchg >= 0 else "▼"
+            with _wl_cols[_wi % 4]:
+                st.markdown(
+                    f"<div style='background:#000;border:1px solid rgba(255,255,255,0.08);"
+                    f"border-radius:14px;padding:14px;margin-bottom:8px;'>"
+                    f"<div style='font-family:DM Mono,monospace;font-weight:700;"
+                    f"font-size:0.88rem;color:#fff;margin-bottom:4px;'>{_wt}</div>"
+                    f"<div style='font-family:DM Mono,monospace;font-size:1.3rem;"
+                    f"font-weight:700;color:#fff;'>${_wpx:,.2f}</div>"
+                    f"<div style='font-family:DM Mono,monospace;font-size:0.8rem;"
+                    f"color:{_wclr};margin-top:2px;'>{_warr} {abs(_wchg):.2%}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                if st.button("✕", key=f"_wl_rm_{_wt}", use_container_width=True):
+                    _to_remove.append(_wt)
+
+        if _to_remove:
+            st.session_state["watchlist"] = [t for t in _watchlist if t not in _to_remove]
+            _wl_pname = st.session_state.get("portfolio_name", "")
+            if _wl_pname:
+                save_portfolio(_wl_pname,
+                               st.session_state.get("transactions", []),
+                               st.session_state.get("target_weights", {}),
+                               st.session_state.get("benchmark", "SPY"))
+            st.rerun()
+    else:
+        st.markdown(
+            "<div style='background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);"
+            "border-radius:12px;padding:16px;text-align:center;color:#48484a;"
+            "font-size:0.82rem;font-family:DM Mono,monospace;'>"
+            "Tu watchlist está vacía. Agrega tickers arriba para monitorearlos.</div>",
+            unsafe_allow_html=True,
+        )
 
 
 # ─────────────────────────────────────────────────────────────
