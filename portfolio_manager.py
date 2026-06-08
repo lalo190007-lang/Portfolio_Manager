@@ -8524,73 +8524,166 @@ def sidebar() -> None:
 # ─────────────────────────────────────────────────────────────
 
 def tab_market_overview() -> None:
-    """Vista rápida: índices + sector ETFs."""
-    section("MERCADO HOY")
+    """Vista rápida: índices + sector ETFs — estilo Market Pulse cards."""
+
+    def _mkt_spark(spark: list, chg: float) -> str:
+        if len(spark) < 4:
+            return ""
+        w, h = 180, 48
+        lo, hi = min(spark), max(spark)
+        rng = (hi - lo) if hi != lo else 1.0
+        pts = " ".join(
+            f"{i*(w/(len(spark)-1)):.1f},{h-(v-lo)/rng*(h-4):.1f}"
+            for i, v in enumerate(spark)
+        )
+        clr = "#30d158" if chg >= 0 else "#ff453a"
+        fid = f"mf{abs(hash(str(round(spark[0],2))))%9999}"
+        last_y = f"{h-(spark[-1]-lo)/rng*(h-4):.1f}"
+        return (
+            f'<svg width="100%" height="{h}" viewBox="0 0 {w} {h}" '
+            f'preserveAspectRatio="none" style="display:block;margin:8px 0 4px;">'
+            f'<defs><linearGradient id="{fid}" x1="0" y1="0" x2="0" y2="1">'
+            f'<stop offset="0%" stop-color="{clr}" stop-opacity=".20"/>'
+            f'<stop offset="100%" stop-color="{clr}" stop-opacity="0"/>'
+            f'</linearGradient></defs>'
+            f'<polyline points="0,{h} {pts} {w},{h}" fill="url(#{fid})" stroke="none"/>'
+            f'<polyline points="{pts}" fill="none" stroke="{clr}" '
+            f'stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>'
+            f'<circle cx="{w}" cy="{last_y}" r="3" fill="{clr}" opacity=".9"/>'
+            f'</svg>'
+        )
+
+    def _mkt_card(t: str, pd_: dict) -> str:
+        price = pd_.get("price", 0.0)
+        pv    = pd_.get("prev_close", 0.0)
+        chg_p = (price - pv) / pv if pv > 0 else 0.0
+        chg_o = pd_.get("change_vs_open", 0.0) or 0.0
+        has_o = pd_.get("day_open", 0) > 0
+        chg   = chg_o if has_o else chg_p
+        rsi   = pd_.get("rsi14")
+        sma   = pd_.get("above_sma20")
+        vr    = pd_.get("vol_ratio")
+        chg1w = pd_.get("change_1w")
+        spark = pd_.get("spark_prices", [])
+
+        clr = "#30d158" if chg >= 0 else "#ff453a"
+        bg  = "rgba(48,209,88,0.04)" if chg >= 0 else "rgba(255,69,58,0.04)"
+        brd = "rgba(48,209,88,0.15)" if chg >= 0 else "rgba(255,69,58,0.15)"
+        pc  = "#30d158" if chg_p >= 0 else "#ff453a"
+        pa  = "▲" if chg_p >= 0 else "▼"
+
+        spark_svg = _mkt_spark(spark, chg)
+
+        rsi_b = ""
+        if rsi is not None:
+            rc = "#ff453a" if rsi>=70 else "#30d158" if rsi<=30 else "#8e8e93"
+            rt = f"RSI {rsi:.0f} {'↑ OC' if rsi>=70 else '↓ OS' if rsi<=30 else ''}"
+            rsi_b = (f"<span style='background:rgba(142,142,147,.1);color:{rc};"
+                     f"border:1px solid {rc}22;border-radius:5px;"
+                     f"padding:1px 7px;font-size:0.65rem;font-family:DM Mono,monospace;"
+                     f"font-weight:700;'>{rt}</span>")
+
+        sma_t = ("<span style='color:#86efac;font-size:0.65rem;'>↑ SMA20</span>" if sma is True
+                 else "<span style='color:#ff453a;font-size:0.65rem;'>↓ SMA20</span>" if sma is False
+                 else "")
+
+        w1_t = ""
+        if chg1w is not None:
+            wc = "#30d158" if chg1w >= 0 else "#ff453a"
+            w1_t = (f"<span style='color:{wc};font-size:0.65rem;"
+                    f"font-family:DM Mono,monospace;'>1S: {chg1w:+.1%}</span>")
+
+        vol_t = ""
+        if vr is not None and (vr >= 1.5 or vr <= 0.5):
+            vc = "#ffd60a" if vr >= 1.5 else "#8e8e93"
+            vol_t = (f"<span style='color:{vc};font-size:0.65rem;font-family:DM Mono,monospace;"
+                     f"background:rgba(255,255,255,0.04);border-radius:5px;"
+                     f"padding:1px 6px;'>Vol ×{vr:.1f}</span>")
+
+        open_r = ""
+        if has_o:
+            oc = "#30d158" if chg_o >= 0 else "#ff453a"
+            oa = "▲" if chg_o >= 0 else "▼"
+            open_r = (f"<div style='font-size:0.62rem;color:{oc};font-family:DM Mono,monospace;"
+                      f"margin-top:1px;opacity:.8;'>{oa} {abs(chg_o):.2%} "
+                      f"<span style='color:#636366;font-size:.58rem;'>apertura</span></div>")
+
+        return (
+            f'<div class="mp-card" style="background:{bg};border:1px solid {brd};'
+            f'border-radius:18px;padding:16px 18px 14px;display:flex;flex-direction:column;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
+            f'<div>'
+            f'<div style="font-family:DM Mono,monospace;font-weight:900;font-size:0.95rem;'
+            f'color:#fff;line-height:1;">{t}</div>'
+            f'<div style="font-family:DM Mono,monospace;font-size:1.5rem;font-weight:700;'
+            f'color:#fff;line-height:1.1;margin-top:3px;letter-spacing:-1px;">${price:,.2f}</div>'
+            f'</div>'
+            f'<div style="text-align:right;">'
+            f'<div style="font-family:DM Mono,monospace;font-size:1.3rem;font-weight:700;'
+            f'color:{pc};line-height:1;">{pa} {abs(chg_p):.2%}</div>'
+            f'<div style="font-size:0.6rem;color:#636366;margin-top:1px;">vs cierre anterior</div>'
+            f'{open_r}</div></div>'
+            f'{spark_svg}'
+            f'<div style="height:1px;background:rgba(255,255,255,0.05);margin:4px 0;"></div>'
+            f'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;">'
+            f'{rsi_b}{w1_t}{sma_t}{vol_t}</div></div>'
+        )
+
     MARKET_GROUPS = {
-        "Índices":     ["SPY","QQQ","IWM","DIA"],
-        "Renta Fija":  ["TLT","AGG","HYG"],
-        "Commodities": ["GLD","SLV","USO"],
+        "Índices":     ["SPY", "QQQ", "IWM", "DIA"],
+        "Renta Fija":  ["TLT", "AGG", "HYG"],
+        "Commodities": ["GLD", "SLV", "USO"],
         "Volatilidad": ["VXX"],
     }
-    with st.spinner("Descargando mercados…"):
-        all_t = [t for g in MARKET_GROUPS.values() for t in g]
-        mkt_p = fetch_live_prices(all_t)
+    SECTOR_TICKERS = ["XLK","XLF","XLV","XLY","XLI","XLE","XLU","XLRE","XLB"]
+    SECTOR_LABELS  = {
+        "XLK":"Tech","XLF":"Finanzas","XLV":"Salud","XLY":"Consumo",
+        "XLI":"Industrial","XLE":"Energía","XLU":"Utilities",
+        "XLRE":"Real Estate","XLB":"Materials",
+    }
+    _all_mkt = tuple(sorted(
+        {t for g in MARKET_GROUPS.values() for t in g} | set(SECTOR_TICKERS)
+    ))
 
+    with st.spinner("Cargando mercados…"):
+        mkt_pulse = fetch_pulse_data(_all_mkt)
+
+    section("MERCADO HOY")
     for gname, gtickers in MARKET_GROUPS.items():
         st.markdown(
             f"<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
             f"color:#636366;text-transform:uppercase;font-family:DM Mono,monospace;"
-            f"margin:14px 0 8px;'>{gname}</div>", unsafe_allow_html=True)
-        gcols = st.columns(len(gtickers))
-        for gcol, t in zip(gcols, gtickers):
-            inf  = mkt_p.get(t, {})
-            px   = inf.get("price",      0.0)
-            pv   = inf.get("prev_close", 0.0)
-            chg  = (px - pv) / pv if pv > 0 else 0.0
-            clr  = "#30d158" if chg >= 0 else "#ff453a"
-            arr  = "▲" if chg >= 0 else "▼"
-            with gcol:
-                st.markdown(f"""
-<div style="background:rgba(22,22,31,0.7);border:1px solid rgba(255,255,255,0.07);
-            border-radius:12px;padding:12px 14px;text-align:center;">
-  <div style="font-family:DM Mono,monospace;font-weight:700;font-size:0.9rem;
-              color:#ffffff;">{t}</div>
-  <div style="font-family:DM Mono,monospace;font-size:1.1rem;font-weight:700;
-              color:#fff;margin-top:2px;">${px:,.2f}</div>
-  <div style="font-size:0.82rem;color:{clr};font-family:DM Mono,monospace;">
-    {arr} {abs(chg):.2%}</div>
-</div>""", unsafe_allow_html=True)
+            f"margin:14px 0 8px;'>{gname}</div>",
+            unsafe_allow_html=True,
+        )
+        _gcols = st.columns(len(gtickers), gap="small")
+        for _gc, _gt in zip(_gcols, gtickers):
+            with _gc:
+                st.markdown(_mkt_card(_gt, mkt_pulse.get(_gt, {})),
+                            unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     section("SECTORES S&P 500")
-    SECTORS = {
-        "Tech (XLK)":       "XLK", "Finanzas (XLF)":   "XLF",
-        "Salud (XLV)":      "XLV", "Consumo (XLY)":    "XLY",
-        "Industrial (XLI)": "XLI", "Energía (XLE)":    "XLE",
-        "Utilities (XLU)":  "XLU", "Real Estate (XLRE)":"XLRE",
-        "Materials (XLB)":  "XLB",
-    }
-    with st.spinner("Cargando sectores…"):
-        sec_p = fetch_live_prices(list(SECTORS.values()))
-
-    scols = st.columns(3)
-    for i, (label, tk) in enumerate(SECTORS.items()):
-        inf  = sec_p.get(tk, {})
-        px   = inf.get("price",      0.0)
-        pv   = inf.get("prev_close", 0.0)
-        chg  = (px - pv) / pv if pv > 0 else 0.0
-        clr  = "#30d158" if chg >= 0 else "#ff453a"
-        rgb  = "48,209,88" if chg >= 0 else "255,69,58"
-        arr  = "▲" if chg >= 0 else "▼"
-        with scols[i % 3]:
-            st.markdown(f"""
-<div style="background:rgba({rgb},0.06);border:1px solid rgba({rgb},0.2);
-            border-radius:10px;padding:10px 14px;margin-bottom:8px;
-            display:flex;justify-content:space-between;align-items:center;">
-  <span style="font-size:0.8rem;color:#aeaeb2;">{label}</span>
-  <span style="font-family:DM Mono,monospace;font-weight:700;color:{clr};">
-    {arr} {abs(chg):.2%}</span>
-</div>""", unsafe_allow_html=True)
+    _seccols = st.columns(3, gap="small")
+    for _si, _stk in enumerate(SECTOR_TICKERS):
+        _sd  = mkt_pulse.get(_stk, {})
+        _sp  = _sd.get("price", 0.0)
+        _spv = _sd.get("prev_close", 0.0)
+        _sch = (_sp - _spv) / _spv if _spv > 0 else 0.0
+        _rgb = "48,209,88" if _sch >= 0 else "255,69,58"
+        _sc  = "#30d158" if _sch >= 0 else "#ff453a"
+        _sar = "▲" if _sch >= 0 else "▼"
+        with _seccols[_si % 3]:
+            st.markdown(
+                f"<div style='background:rgba({_rgb},0.05);border:1px solid rgba({_rgb},0.18);"
+                f"border-radius:10px;padding:10px 14px;margin-bottom:8px;"
+                f"display:flex;justify-content:space-between;align-items:center;'>"
+                f"<span style='font-size:0.8rem;color:#aeaeb2;'>{SECTOR_LABELS[_stk]}"
+                f"<span style='color:#48484a;font-size:0.7rem;'> {_stk}</span></span>"
+                f"<span style='font-family:DM Mono,monospace;font-weight:700;color:{_sc};'>"
+                f"{_sar} {abs(_sch):.2%}</span></div>",
+                unsafe_allow_html=True,
+            )
 
     # ── Watchlist ──────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
