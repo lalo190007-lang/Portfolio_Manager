@@ -251,18 +251,9 @@ def _gist_sync_once() -> None:
                 except Exception:
                     pass
 
-        # ── Credenciales ─────────────────────────────────────
-        if fname == _GIST_CREDS_FILE and fdata:
-            try:
-                creds = json.loads(fdata.get("content", "{}"))
-                if creds.get("anthropic_key") and not _load_anthropic_key():
-                    _write_credential(_ANTHROPIC_KEY_FILE, creds["anthropic_key"])
-                    st.session_state["anthropic_api_key"] = creds["anthropic_key"]
-                if creds.get("banxico_token") and not _load_banxico_token():
-                    _write_credential(_BANXICO_TOKEN_FILE, creds["banxico_token"])
-                    st.session_state["banxico_token"] = creds["banxico_token"]
-            except Exception:
-                pass
+        # Nota: las API keys (Anthropic, Banxico) NO se guardan en el Gist
+        # para evitar que GitHub las detecte y las bloquee.
+        # Usar Streamlit Secrets para persistir esas credenciales.
 
     if synced:
         st.session_state["_gist_sync_count"] = synced
@@ -8047,7 +8038,6 @@ def sidebar() -> None:
         if cleaned.startswith("sk-ant"):
             st.session_state["anthropic_api_key"] = cleaned
             _write_credential(_ANTHROPIC_KEY_FILE, cleaned)
-            _gist_save_credentials()   # sincronizar al Gist
             st.sidebar.success("✓ Key guardada correctamente")
         elif cleaned:
             st.sidebar.error("La key debe empezar con 'sk-ant-...'")
@@ -8233,7 +8223,6 @@ def sidebar() -> None:
                 st.session_state["banxico_token"] = _tok
                 _write_credential(_BANXICO_TOKEN_FILE, _tok)
                 fetch_cetes_rate.clear()
-                _gist_save_credentials()   # sincronizar al Gist
                 st.sidebar.success("✓ Token guardado")
                 st.rerun()
             else:
