@@ -153,6 +153,42 @@ def _gist_create() -> str:
     return ""
 
 
+def _gist_find_existing() -> str:
+    """
+    Busca en los Gists del usuario uno con descripción de Portfolio Manager.
+    Útil al reiniciar cuando se pierde el GIST_ID del filesystem efímero.
+    Devuelve el ID si lo encuentra, o "" si no hay ninguno.
+    """
+    if not _load_github_token():
+        return ""
+    try:
+        page = 1
+        while page <= 5:  # máximo 5 páginas = 500 gists
+            r = requests.get(
+                "https://api.github.com/gists",
+                headers=_gist_headers(),
+                params={"per_page": 100, "page": page},
+                timeout=15,
+            )
+            if r.status_code != 200:
+                break
+            items = r.json()
+            if not items:
+                break
+            for gist in items:
+                desc = gist.get("description", "")
+                if "Portfolio Manager" in desc:
+                    gid = gist["id"]
+                    _write_credential(_GITHUB_GIST_ID_FILE, gid)
+                    return gid
+            if len(items) < 100:
+                break
+            page += 1
+    except Exception:
+        pass
+    return ""
+
+
 def _gist_get_files() -> dict:
     """Devuelve el dict de archivos del Gist o {} si falla."""
     gid = _load_gist_id()
@@ -8344,7 +8380,19 @@ def sidebar() -> None:
         # Contar portafolios en el Gist
         _gist_files = _gist_get_files()
         _pf_count = sum(1 for f in _gist_files if f.startswith(_GIST_PF_PREFIX))
-        _creds_ok  = _GIST_CREDS_FILE in _gist_files
+        _gist_id_short = _gh_gist_id[:8] + "…"
+        # Verificar si ya está guardado en Secrets (no necesita recordatorio)
+        _gist_id_in_secrets = False
+        try:
+            _gist_id_in_secrets = bool(st.secrets.get("GITHUB_GIST_ID", ""))
+        except Exception:
+            pass
+        _token_in_secrets = False
+        try:
+            _token_in_secrets = bool(st.secrets.get("GITHUB_TOKEN", ""))
+        except Exception:
+            pass
+        _needs_secrets_tip = not (_gist_id_in_secrets and _token_in_secrets)
         st.sidebar.markdown(
             f"<div style='background:rgba(48,209,88,0.07);border:1px solid "
             f"rgba(48,209,88,0.2);border-radius:10px;padding:10px 12px;'>"
@@ -8352,13 +8400,24 @@ def sidebar() -> None:
             f"text-transform:uppercase;letter-spacing:.8px;'>GITHUB GIST · CONECTADO</div>"
             f"<div style='font-size:1rem;font-weight:700;color:#30d158;"
             f"font-family:DM Mono,monospace;margin-top:3px;'>"
-            f"✓ {_pf_count} portafolio{'s' if _pf_count != 1 else ''}"
-            f"{'  ·  🔑 tokens' if _creds_ok else ''}</div>"
-            f"<div style='font-size:0.68rem;color:#8e8e93;font-family:DM Mono,monospace;"
-            f"margin-top:2px;'>Todo persiste al reiniciar la app</div>"
+            f"✓ {_pf_count} portafolio{'s' if _pf_count != 1 else ''}</div>"
+            f"<div style='font-size:0.68rem;color:#636366;font-family:DM Mono,monospace;"
+            f"margin-top:2px;'>ID: {_gist_id_short}</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
+        if _needs_secrets_tip:
+            st.sidebar.markdown(
+                "<div style='background:rgba(255,214,10,0.06);border:1px solid rgba(255,214,10,0.18);"
+                "border-radius:8px;padding:8px 10px;margin-top:6px;font-size:0.68rem;"
+                "color:#ffd60a;font-family:DM Mono,monospace;'>"
+                "⚠️ <b>Para no volver a perder datos:</b><br>"
+                "Agrega en Streamlit Secrets:<br>"
+                "<code style='color:#aeaeb2;font-size:0.65rem;'>GITHUB_TOKEN = \"ghp_...\"</code><br>"
+                f"<code style='color:#aeaeb2;font-size:0.65rem;'>GITHUB_GIST_ID = \"{_gh_gist_id}\"</code>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
         _sync_n = st.session_state.pop("_gist_sync_count", 0)
         if _sync_n:
             st.sidebar.success(f"☁️ {_sync_n} portafolio(s) restaurado(s) desde GitHub")
@@ -8369,14 +8428,21 @@ def sidebar() -> None:
             st.session_state.pop("_gist_synced", None)
             st.rerun()
     elif _gh_token and not _gh_gist_id:
-        # Token OK pero sin Gist — crearlo automáticamente
-        st.sidebar.info("Token válido — creando Gist...")
-        _new_id = _gist_create()
-        if _new_id:
-            st.sidebar.success("✓ Gist creado automáticamente")
-            st.rerun()
-        else:
-            st.sidebar.error("No se pudo crear el Gist. Verifica el token.")
+        # Token OK pero sin Gist ID — buscar uno existente primero antes de crear
+        with st.sidebar:
+            with st.spinner("Buscando Gist existente..."):
+                _found_id = _gist_find_existing()
+            if _found_id:
+                st.session_state.pop("_gist_synced", None)
+                st.rerun()
+            else:
+                with st.spinner("Creando Gist nuevo..."):
+                    _new_id = _gist_create()
+                if _new_id:
+                    st.session_state.pop("_gist_synced", None)
+                    st.rerun()
+                else:
+                    st.error("No se pudo crear el Gist. Verifica el token.")
     else:
         st.sidebar.markdown(
             "<div style='background:rgba(255,214,10,0.06);border:1px solid rgba(255,214,10,0.18);"
