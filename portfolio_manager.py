@@ -948,6 +948,37 @@ def fetch_pulse_data(tickers: list[str]) -> dict:
     return result
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_range_data(tickers: tuple, period: str) -> pd.DataFrame:
+    """
+    Cierres diarios ajustados para el período solicitado.
+    period: '1M' | '6M' | 'YTD' | '1A'
+    Devuelve DataFrame con columnas = tickers, índice = fecha.
+    """
+    _map = {"1M": "1mo", "6M": "6mo", "YTD": "ytd", "1A": "1y"}
+    yf_period = _map.get(period, "1mo")
+    if not tickers:
+        return pd.DataFrame()
+    try:
+        raw = yf.download(
+            list(tickers), period=yf_period, interval="1d",
+            auto_adjust=True, prepost=False, progress=False, threads=True,
+        )
+        if raw.empty:
+            return pd.DataFrame()
+        if isinstance(raw.columns, pd.MultiIndex):
+            df = raw["Close"]
+        else:
+            df = raw[["Close"]].rename(columns={"Close": tickers[0]})
+        df = df.dropna(how="all")
+        # Aseguramos que el índice sea DatetimeIndex sin timezone
+        if hasattr(df.index, "tz") and df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=7200, show_spinner=False)
 def fetch_events_data(tickers: tuple) -> dict:
     """
@@ -8619,7 +8650,8 @@ def tab_market_overview() -> None:
             f'</svg>'
         )
 
-    def _mkt_card(t: str, pd_: dict) -> str:
+    def _mkt_card(t: str, pd_: dict, spark_override: list | None = None,
+                  range_chg: float | None = None, range_label: str = "") -> str:
         price = pd_.get("price", 0.0)
         pv    = pd_.get("prev_close", 0.0)
         chg_p = (price - pv) / pv if pv > 0 else 0.0
@@ -8630,7 +8662,10 @@ def tab_market_overview() -> None:
         sma   = pd_.get("above_sma20")
         vr    = pd_.get("vol_ratio")
         chg1w = pd_.get("change_1w")
-        spark = pd_.get("spark_prices", [])
+        # spark_override: lista de precios del período seleccionado
+        spark = spark_override if spark_override is not None else pd_.get("spark_prices", [])
+        # Para sparkline de período usar el cambio del rango, no intraday
+        spark_chg = range_chg if range_chg is not None else chg
 
         clr = "#30d158" if chg >= 0 else "#ff453a"
         bg  = "rgba(48,209,88,0.04)" if chg >= 0 else "rgba(255,69,58,0.04)"
@@ -8638,7 +8673,7 @@ def tab_market_overview() -> None:
         pc  = "#30d158" if chg_p >= 0 else "#ff453a"
         pa  = "▲" if chg_p >= 0 else "▼"
 
-        spark_svg = _mkt_spark(spark, chg)
+        spark_svg = _mkt_spark(spark, spark_chg)
 
         rsi_b = ""
         if rsi is not None:
@@ -8674,6 +8709,22 @@ def tab_market_overview() -> None:
                       f"margin-top:1px;opacity:.8;'>{oa} {abs(chg_o):.2%} "
                       f"<span style='color:#636366;font-size:.58rem;'>apertura</span></div>")
 
+        # Cambio de período en esquina superior derecha si hay rango seleccionado
+        if range_chg is not None and range_label:
+            rc2 = "#30d158" if range_chg >= 0 else "#ff453a"
+            ra2 = "▲" if range_chg >= 0 else "▼"
+            range_badge = (
+                f'<div style="font-family:DM Mono,monospace;font-size:1.3rem;font-weight:700;'
+                f'color:{rc2};line-height:1;">{ra2} {abs(range_chg):.2%}</div>'
+                f'<div style="font-size:0.6rem;color:#636366;margin-top:1px;">{range_label}</div>'
+            )
+        else:
+            range_badge = (
+                f'<div style="font-family:DM Mono,monospace;font-size:1.3rem;font-weight:700;'
+                f'color:{pc};line-height:1;">{pa} {abs(chg_p):.2%}</div>'
+                f'<div style="font-size:0.6rem;color:#636366;margin-top:1px;">vs cierre anterior</div>'
+                f'{open_r}'
+            )
         return (
             f'<div class="mp-card" style="background:{bg};border:1px solid {brd};'
             f'border-radius:18px;padding:16px 18px 14px;display:flex;flex-direction:column;">'
@@ -8684,11 +8735,7 @@ def tab_market_overview() -> None:
             f'<div style="font-family:DM Mono,monospace;font-size:1.5rem;font-weight:700;'
             f'color:#fff;line-height:1.1;margin-top:3px;letter-spacing:-1px;">${price:,.2f}</div>'
             f'</div>'
-            f'<div style="text-align:right;">'
-            f'<div style="font-family:DM Mono,monospace;font-size:1.3rem;font-weight:700;'
-            f'color:{pc};line-height:1;">{pa} {abs(chg_p):.2%}</div>'
-            f'<div style="font-size:0.6rem;color:#636366;margin-top:1px;">vs cierre anterior</div>'
-            f'{open_r}</div></div>'
+            f'<div style="text-align:right;">{range_badge}</div></div>'
             f'{spark_svg}'
             f'<div style="height:1px;background:rgba(255,255,255,0.05);margin:4px 0;"></div>'
             f'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;">'
@@ -8711,10 +8758,51 @@ def tab_market_overview() -> None:
         {t for g in MARKET_GROUPS.values() for t in g} | set(SECTOR_TICKERS)
     ))
 
+    # ── Selector de rango ─────────────────────────────────────
+    _RANGE_OPTS  = ["1D", "1M", "6M", "YTD", "1A"]
+    _RANGE_LABEL = {"1D": "hoy", "1M": "1 mes", "6M": "6 meses", "YTD": "año actual", "1A": "1 año"}
+    _range_sel = st.session_state.get("mkt_range", "1D")
+    _rc1, _rc2, _rc3, _rc4, _rc5, _ = st.columns([1, 1, 1, 1, 1, 5])
+    for _rcol, _ropt in zip([_rc1, _rc2, _rc3, _rc4, _rc5], _RANGE_OPTS):
+        with _rcol:
+            _is_active = (_range_sel == _ropt)
+            _btn_style = (
+                "background:#0a84ff;color:#fff;border:none;border-radius:20px;"
+                "padding:4px 14px;font-family:DM Mono,monospace;font-size:0.75rem;"
+                "font-weight:700;cursor:pointer;width:100%;"
+            ) if _is_active else (
+                "background:rgba(255,255,255,0.06);color:#8e8e93;border:1px solid rgba(255,255,255,0.1);"
+                "border-radius:20px;padding:4px 14px;font-family:DM Mono,monospace;"
+                "font-size:0.75rem;cursor:pointer;width:100%;"
+            )
+            if st.button(_ropt, key=f"_mkt_range_{_ropt}",
+                         use_container_width=True,
+                         type="primary" if _is_active else "secondary"):
+                st.session_state["mkt_range"] = _ropt
+                st.rerun()
+
+    st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
+
     with st.spinner("Cargando mercados…"):
         mkt_pulse = fetch_pulse_data(_all_mkt)
 
-    section("MERCADO HOY")
+    # Datos históricos del rango si no es 1D
+    _range_df    = pd.DataFrame()
+    _spark_cache: dict[str, list] = {}
+    _range_ret:   dict[str, float] = {}
+    _rlabel = _RANGE_LABEL.get(_range_sel, "")
+    if _range_sel != "1D":
+        with st.spinner(f"Cargando histórico {_rlabel}…"):
+            _range_df = fetch_range_data(_all_mkt, _range_sel)
+        if not _range_df.empty:
+            for _t in _all_mkt:
+                if _t in _range_df.columns:
+                    _ser = _range_df[_t].dropna()
+                    if len(_ser) >= 2:
+                        _spark_cache[_t] = _ser.tolist()
+                        _range_ret[_t]   = float((_ser.iloc[-1] - _ser.iloc[0]) / _ser.iloc[0])
+
+    section("MERCADO HOY" if _range_sel == "1D" else f"MERCADO · {_range_sel}")
     for gname, gtickers in MARKET_GROUPS.items():
         st.markdown(
             f"<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
@@ -8725,8 +8813,83 @@ def tab_market_overview() -> None:
         _gcols = st.columns(len(gtickers), gap="small")
         for _gc, _gt in zip(_gcols, gtickers):
             with _gc:
-                st.markdown(_mkt_card(_gt, mkt_pulse.get(_gt, {})),
-                            unsafe_allow_html=True)
+                _spark_ov  = _spark_cache.get(_gt) if _range_sel != "1D" else None
+                _range_chg = _range_ret.get(_gt)   if _range_sel != "1D" else None
+                st.markdown(
+                    _mkt_card(_gt, mkt_pulse.get(_gt, {}),
+                              spark_override=_spark_ov,
+                              range_chg=_range_chg,
+                              range_label=_rlabel),
+                    unsafe_allow_html=True,
+                )
+
+    # ── Gráfica comparativa de rendimiento por período ─────────
+    if _range_sel != "1D" and not _range_df.empty:
+        st.markdown("<br>", unsafe_allow_html=True)
+        section(f"RENDIMIENTO COMPARADO · {_range_sel}")
+
+        # Colores por ticker (palette Apple)
+        _COLORS = ["#0a84ff","#30d158","#bf5af2","#ffd60a","#ff453a",
+                   "#ff9f0a","#64d2ff","#ff375f","#30d158","#5e5ce6"]
+
+        # Selector de grupo a mostrar en la gráfica
+        _chart_groups = {g: ts for g, ts in MARKET_GROUPS.items()}
+        _chart_groups["Sectores"] = SECTOR_TICKERS
+        _grp_opts = list(_chart_groups.keys())
+        _grp_sel  = st.session_state.get("mkt_chart_group", "Índices")
+        if _grp_sel not in _grp_opts:
+            _grp_sel = _grp_opts[0]
+
+        _gc1, _gc2, _gc3, _gc4, _gc5, _ = st.columns([1.2, 1.2, 1.2, 1.2, 1.2, 3])
+        for _gcol2, _gopt in zip([_gc1, _gc2, _gc3, _gc4, _gc5], _grp_opts):
+            with _gcol2:
+                if st.button(_gopt, key=f"_mkt_grp_{_gopt}", use_container_width=True,
+                             type="primary" if _grp_sel == _gopt else "secondary"):
+                    st.session_state["mkt_chart_group"] = _gopt
+                    st.rerun()
+
+        _chart_tickers = _chart_groups.get(_grp_sel, [])
+        _fig_rng = go.Figure()
+        _ci = 0
+        for _ct in _chart_tickers:
+            if _ct not in _range_df.columns:
+                continue
+            _ser = _range_df[_ct].dropna()
+            if len(_ser) < 2:
+                continue
+            _norm = (_ser / _ser.iloc[0] - 1) * 100  # % vs primer día
+            _clr  = _COLORS[_ci % len(_COLORS)]
+            _ci  += 1
+            _fig_rng.add_trace(go.Scatter(
+                x=_norm.index, y=_norm.values,
+                name=_ct, mode="lines",
+                line=dict(color=_clr, width=2),
+                hovertemplate=f"<b>{_ct}</b>: %{{y:+.2f}}%<extra></extra>",
+            ))
+        # Línea de cero
+        _fig_rng.add_hline(y=0, line_color="rgba(255,255,255,0.15)", line_width=1)
+        _fig_rng.update_layout(
+            **_pl("xaxis", "yaxis"),
+            height=340,
+            paper_bgcolor="#000000",
+            plot_bgcolor="#000000",
+            xaxis=dict(
+                gridcolor="rgba(255,255,255,0.05)", showgrid=True,
+                zerolinecolor="rgba(255,255,255,0.08)",
+                tickformat="%b %d" if _range_sel in ("1M",) else "%b '%y",
+            ),
+            yaxis=dict(
+                gridcolor="rgba(255,255,255,0.05)", showgrid=True,
+                zerolinecolor="rgba(255,255,255,0.08)",
+                ticksuffix="%",
+            ),
+            legend=dict(
+                bgcolor="rgba(28,28,30,0.85)", bordercolor="rgba(255,255,255,0.08)",
+                borderwidth=1, font=dict(color="#aeaeb2", size=11),
+                orientation="h", y=-0.18,
+            ),
+        )
+        st.plotly_chart(_fig_rng, use_container_width=True, config={"displayModeBar": False})
 
     st.markdown("<br>", unsafe_allow_html=True)
     section("SECTORES S&P 500")
@@ -8735,7 +8898,13 @@ def tab_market_overview() -> None:
         _sd  = mkt_pulse.get(_stk, {})
         _sp  = _sd.get("price", 0.0)
         _spv = _sd.get("prev_close", 0.0)
-        _sch = (_sp - _spv) / _spv if _spv > 0 else 0.0
+        # Usar retorno del período si hay rango activo
+        if _range_sel != "1D" and _stk in _range_ret:
+            _sch = _range_ret[_stk]
+            _sec_sub = f"<span style='color:#48484a;font-size:0.62rem;'> {_range_sel}</span>"
+        else:
+            _sch = (_sp - _spv) / _spv if _spv > 0 else 0.0
+            _sec_sub = ""
         _rgb = "48,209,88" if _sch >= 0 else "255,69,58"
         _sc  = "#30d158" if _sch >= 0 else "#ff453a"
         _sar = "▲" if _sch >= 0 else "▼"
@@ -8747,7 +8916,7 @@ def tab_market_overview() -> None:
                 f"<span style='font-size:0.8rem;color:#aeaeb2;'>{SECTOR_LABELS[_stk]}"
                 f"<span style='color:#48484a;font-size:0.7rem;'> {_stk}</span></span>"
                 f"<span style='font-family:DM Mono,monospace;font-weight:700;color:{_sc};'>"
-                f"{_sar} {abs(_sch):.2%}</span></div>",
+                f"{_sar} {abs(_sch):.2%}{_sec_sub}</span></div>",
                 unsafe_allow_html=True,
             )
 
