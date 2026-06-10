@@ -1807,6 +1807,98 @@ def _pl(*exclude):
     return {k: v for k, v in PLOTLY_LAYOUT.items() if k not in skip}
 
 
+def _build_donut_html(df_live: pd.DataFrame, nav: float,
+                      chart_colors: list) -> str:
+    """
+    Donut SVG + leyenda con logos como un único bloque HTML unificado.
+    Sin Plotly — control total sobre el layout.
+    """
+    import math
+
+    total = df_live["Valor"].sum()
+    if total <= 0:
+        return ""
+
+    sorted_df = df_live.sort_values("Valor", ascending=False).reset_index(drop=True)
+    cx, cy, R, ri = 100, 100, 88, 58   # centro, radio externo, radio interno
+    angle = -90.0                        # empieza desde arriba
+
+    svg_paths = ""
+    legend_rows = ""
+
+    for i, row in sorted_df.iterrows():
+        pct   = row["Valor"] / total
+        sweep = pct * 360
+        clr   = chart_colors[i % len(chart_colors)]
+        tick  = str(row["Emisora"])
+
+        # Ángulos con pequeño gap entre sectores
+        a1 = math.radians(angle + 0.7)
+        a2 = math.radians(angle + sweep - 0.7)
+        laf = 1 if sweep > 180 else 0
+
+        x1o, y1o = cx + R  * math.cos(a1), cy + R  * math.sin(a1)
+        x2o, y2o = cx + R  * math.cos(a2), cy + R  * math.sin(a2)
+        x1i, y1i = cx + ri * math.cos(a1), cy + ri * math.sin(a1)
+        x2i, y2i = cx + ri * math.cos(a2), cy + ri * math.sin(a2)
+
+        pd_ = (f"M{x1o:.1f} {y1o:.1f}"
+               f"A{R} {R} 0 {laf} 1 {x2o:.1f} {y2o:.1f}"
+               f"L{x2i:.1f} {y2i:.1f}"
+               f"A{ri} {ri} 0 {laf} 0 {x1i:.1f} {y1i:.1f}Z")
+        tooltip = f"{tick} · {pct:.1%} · ${row['Valor']:,.0f}"
+        svg_paths += (
+            f'<path d="{pd_}" fill="{clr}" '
+            f'style="cursor:default;transition:opacity .15s;" '
+            f'onmouseover="this.style.opacity=\'0.7\'" '
+            f'onmouseout="this.style.opacity=\'1\'">'
+            f'<title>{tooltip}</title></path>\n'
+        )
+
+        logo = f"https://assets.parqet.com/logos/symbol/{tick.upper()}"
+        legend_rows += (
+            f'<div style="display:flex;align-items:center;gap:7px;padding:4px 0;">'
+            f'<div style="width:8px;height:8px;border-radius:50%;'
+            f'background:{clr};flex-shrink:0;"></div>'
+            f'<img src="{logo}" width="22" height="22" '
+            f'style="border-radius:5px;object-fit:contain;'
+            f'background:#1c1c1e;padding:1px;flex-shrink:0;" '
+            f'onerror="this.style.display=\'none\'">'
+            f'<span style="font-family:\'DM Mono\',monospace;font-size:0.72rem;'
+            f'color:#aeaeb2;flex:1;">{tick}</span>'
+            f'<span style="font-family:\'DM Mono\',monospace;font-size:0.70rem;'
+            f'color:#636366;flex-shrink:0;">{pct:.1%}</span>'
+            f'</div>'
+        )
+        angle += sweep
+
+    nav_str = f"${nav:,.0f}" if nav < 1_000_000 else f"${nav/1_000:.0f}K"
+    n = len(sorted_df)
+
+    return (
+        f'<div style="background:#000;border:1px solid rgba(255,255,255,0.08);'
+        f'border-radius:18px;padding:14px 18px 14px 10px;'
+        f'display:flex;align-items:center;gap:4px;">'
+        # ── SVG donut ──
+        f'<div style="flex-shrink:0;">'
+        f'<svg width="190" height="190" viewBox="0 0 200 200">'
+        f'{svg_paths}'
+        f'<text x="100" y="95" text-anchor="middle" dominant-baseline="middle" '
+        f'style="fill:#fff;font-size:16px;font-weight:700;'
+        f'font-family:\'DM Mono\',monospace;">{nav_str}</text>'
+        f'<text x="100" y="114" text-anchor="middle" '
+        f'style="fill:#636366;font-size:10px;font-family:\'DM Mono\',monospace;">'
+        f'{n} activos</text>'
+        f'</svg></div>'
+        # ── Leyenda ──
+        f'<div style="flex:1;min-width:0;padding-left:6px;">'
+        f'<div style="font-size:0.58rem;color:#636366;font-family:\'DM Mono\',monospace;'
+        f'text-transform:uppercase;letter-spacing:2px;margin-bottom:6px;">Composición</div>'
+        f'{legend_rows}'
+        f'</div></div>'
+    )
+
+
 def tab_dashboard() -> None:
     hdf = holdings_df()
     if hdf.empty:
@@ -2120,7 +2212,7 @@ def tab_dashboard() -> None:
     if _monthly_hero:
         st.markdown(_build_monthly_hero(_monthly_hero), unsafe_allow_html=True)
 
-    col_line, col_donut, col_donut_legend = st.columns([3, 1, 1.4], gap="small")
+    col_line, col_donut = st.columns([3, 2], gap="small")
 
     with col_line:
         if port_c is not None and len(port_c) > 0:
@@ -2208,69 +2300,9 @@ def tab_dashboard() -> None:
                     "#facc15","#c084fc","#ff453a","#67e8f9"]
 
     with col_donut:
-        fig_d = go.Figure(go.Pie(
-            labels=df_live["Emisora"], values=df_live["Valor"],
-            hole=0.72,
-            marker_colors=CHART_COLORS[:len(df_live)],
-            marker=dict(line=dict(color="#000000", width=2)),
-            textinfo="none",
-            hovertemplate="<b>%{label}</b>  %{percent}<br>$%{value:,.2f}<extra></extra>",
-            direction="clockwise", sort=True,
-        ))
-        # Anotación central: valor en grande + n activos debajo
-        _nav_str = f"${nav:,.0f}" if nav < 1_000_000 else f"${nav/1_000:.0f}K"
-        fig_d.add_annotation(
-            text=(f"<b style='font-size:17px'>{_nav_str}</b>"
-                  f"<br><span style='font-size:11px;color:#636366'>{len(df_live)} activos</span>"),
-            x=0.5, y=0.5, align="center",
-            font=dict(family="DM Mono, monospace", color="#ffffff"),
-            showarrow=False,
-        )
-        fig_d.update_layout(
-            **_pl("paper_bgcolor", "plot_bgcolor", "margin"),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            height=260, margin=dict(t=8, b=8, l=8, r=8),
-            showlegend=False,
-            hovermode="closest",
-        )
-
-        st.markdown(
-            "<div style='font-size:0.6rem;font-weight:700;letter-spacing:2px;"
-            "color:#636366;text-transform:uppercase;font-family:DM Mono,monospace;"
-            "margin-bottom:2px;'>Composición</div>",
-            unsafe_allow_html=True,
-        )
-        st.plotly_chart(fig_d, use_container_width=True, config=PLOTLY_CONFIG)
-
-    # ── Leyenda con logos (columna separada, alineada al donut) ──
-    with col_donut_legend:
-        _nav_total = df_live["Valor"].sum() if not df_live.empty else 1.0
-        _leg_items = ""
-        for _li, (_, _lr) in enumerate(df_live.sort_values("Valor", ascending=False).iterrows()):
-            _ltk  = _lr["Emisora"]
-            _lpct = _lr["Valor"] / _nav_total if _nav_total > 0 else 0.0
-            _lclr = CHART_COLORS[_li % len(CHART_COLORS)]
-            _logo = f"https://assets.parqet.com/logos/symbol/{_ltk.upper()}"
-            _leg_items += (
-                f"<div style='display:flex;align-items:center;gap:6px;padding:5px 2px;"
-                f"border-radius:6px;'>"
-                f"<div style='width:7px;height:7px;border-radius:50%;"
-                f"background:{_lclr};flex-shrink:0;'></div>"
-                f"<img src='{_logo}' width='20' height='20' "
-                f"style='border-radius:4px;object-fit:contain;background:#1c1c1e;"
-                f"padding:1px;flex-shrink:0;' onerror=\"this.style.display='none'\">"
-                f"<span style='font-family:DM Mono,monospace;font-size:0.68rem;"
-                f"color:#aeaeb2;flex:1;min-width:0;overflow:hidden;"
-                f"text-overflow:ellipsis;white-space:nowrap;'>{_ltk}</span>"
-                f"<span style='font-family:DM Mono,monospace;font-size:0.65rem;"
-                f"color:#636366;flex-shrink:0;'>{_lpct:.1%}</span>"
-                f"</div>"
-            )
-        st.markdown(
-            f"<div style='padding-top:32px;'>{_leg_items}</div>",
-            unsafe_allow_html=True,
-        )
+        _donut_html = _build_donut_html(df_live, nav, CHART_COLORS)
+        if _donut_html:
+            st.markdown(_donut_html, unsafe_allow_html=True)
 
     # ═══════════════════════════════════════════════════════════
     # SECCIÓN 3: P&L BARRAS + DRIFT
