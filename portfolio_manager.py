@@ -2232,14 +2232,39 @@ def tab_dashboard() -> None:
             plot_bgcolor="#000000",
             title=dict(text="Composición", font=dict(size=11, color="#636366", family="DM Mono"), x=0),
             height=308, margin=dict(t=40, b=10, l=10, r=16),
-            showlegend=True,
-            legend=dict(orientation="v", x=1.02, y=0.5, xanchor="left",
-                        font=dict(size=10, color="#8e8e93", family="DM Mono"),
-                        bgcolor="rgba(0,0,0,0)", tracegroupgap=1,
-                        itemsizing="constant"),
+            showlegend=False,
             hovermode="closest",
         )
         st.plotly_chart(fig_d, use_container_width=True, config=PLOTLY_CONFIG)
+
+        # ── Leyenda con logos ──────────────────────────────────
+        _nav_total = df_live["Valor"].sum() if not df_live.empty else 1.0
+        _leg_rows = ""
+        for _li, (_, _lr) in enumerate(df_live.sort_values("Valor", ascending=False).iterrows()):
+            _ltk  = _lr["Emisora"]
+            _lval = _lr["Valor"]
+            _lpct = _lval / _nav_total if _nav_total > 0 else 0.0
+            _lclr = CHART_COLORS[_li % len(CHART_COLORS)]
+            _logo = f"https://assets.parqet.com/logos/symbol/{_ltk.upper()}"
+            _leg_rows += (
+                f"<div style='display:flex;align-items:center;gap:7px;padding:4px 6px;"
+                f"border-radius:7px;transition:background .15s;'>"
+                f"<div style='width:8px;height:8px;border-radius:50%;"
+                f"background:{_lclr};flex-shrink:0;'></div>"
+                f"<img src='{_logo}' width='22' height='22' "
+                f"style='border-radius:5px;object-fit:contain;background:#1c1c1e;flex-shrink:0;' "
+                f"onerror=\"this.style.display='none'\">"
+                f"<span style='font-family:DM Mono,monospace;font-size:0.72rem;"
+                f"color:#aeaeb2;flex:1;'>{_ltk}</span>"
+                f"<span style='font-family:DM Mono,monospace;font-size:0.72rem;"
+                f"color:#636366;'>{_lpct:.1%}</span>"
+                f"</div>"
+            )
+        st.markdown(
+            f"<div style='max-height:180px;overflow-y:auto;padding:2px 0;"
+            f"scrollbar-width:thin;scrollbar-color:#333 transparent;'>{_leg_rows}</div>",
+            unsafe_allow_html=True,
+        )
 
     # ═══════════════════════════════════════════════════════════
     # SECCIÓN 3: P&L BARRAS + DRIFT
@@ -3468,12 +3493,10 @@ def tab_editor() -> None:
 
                 df_pos = pd.DataFrame(pos_rows)
                 df_pos["% Cartera"] = df_pos["Valor Merc. $"] / nav_pos if nav_pos > 0 else 0.0
-                df_pos.insert(0, "Logo", df_pos["Ticker"].apply(_logo_url))
 
                 st.dataframe(
                     df_pos,
                     column_config={
-                        "Logo":            st.column_config.ImageColumn("", width="small"),
                         "Ticker":          st.column_config.TextColumn("Ticker", width="small"),
                         "Títulos":         st.column_config.NumberColumn(format="%.5f"),
                         "Cto. Prom. $":    st.column_config.NumberColumn(format="$%.4f"),
@@ -3521,11 +3544,9 @@ def tab_editor() -> None:
                         unsafe_allow_html=True)
                     df_closed = pd.DataFrame(closed_rows).sort_values(
                         "P&L Real. $", ascending=False)
-                    df_closed.insert(0, "Logo", df_closed["Ticker"].apply(_logo_url))
                     st.dataframe(
                         df_closed,
                         column_config={
-                            "Logo":           st.column_config.ImageColumn("", width="small"),
                             "Ticker":         st.column_config.TextColumn("Ticker", width="small"),
                             "Acciones vend.": st.column_config.NumberColumn(format="%.5f"),
                             "Ingresos $":     st.column_config.NumberColumn(format="$%.2f"),
@@ -5225,11 +5246,9 @@ def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
             unsafe_allow_html=True)
 
         exec_view = display[["Ticker","Acción","Precio","Monto USD","Acciones"]].copy()
-        exec_view.insert(0, "Logo", exec_view["Ticker"].apply(_logo_url))
         st.dataframe(
             exec_view,
             column_config={
-                "Logo":      st.column_config.ImageColumn("", width="small"),
                 "Ticker":    st.column_config.TextColumn("Ticker",   width="small"),
                 "Acción":    st.column_config.TextColumn("Acción",   width="small"),
                 "Precio":    st.column_config.NumberColumn("Precio", format="$%.2f"),
@@ -5251,12 +5270,9 @@ def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
 
         # ── Vista completa con todos los datos ──────────────────
         with st.expander("📋 Ver tabla completa con pesos y drift"):
-            _full_display = display.drop("Monto USD", axis=1).copy()
-            _full_display.insert(0, "Logo", _full_display["Ticker"].apply(_logo_url))
             st.dataframe(
-                _full_display,
+                display.drop("Monto USD", axis=1),
                 column_config={
-                    "Logo":          st.column_config.ImageColumn("", width="small"),
                     "Ticker":        st.column_config.TextColumn("Ticker",    width="small"),
                     "Acción":        st.column_config.TextColumn("Acción",    width="small"),
                     "Precio":        st.column_config.NumberColumn("Precio",  format="$%.2f"),
@@ -5279,11 +5295,8 @@ def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
     holds = df_t[df_t["Acción"] == "HOLD"].copy()
     if not holds.empty:
         with st.expander(f"📌 Sin cambio ({len(holds)})"):
-            _holds_view = holds[["Ticker","Precio","Peso Actual","Peso Objetivo","Val. Actual"]].copy()
-            _holds_view.insert(0, "Logo", _holds_view["Ticker"].apply(_logo_url))
-            st.dataframe(_holds_view,
+            st.dataframe(holds[["Ticker","Precio","Peso Actual","Peso Objetivo","Val. Actual"]],
                          column_config={
-                             "Logo":          st.column_config.ImageColumn("", width="small"),
                              "Precio":        st.column_config.NumberColumn(format="$%.2f"),
                              "Peso Actual":   st.column_config.NumberColumn(format="%.1f%%"),
                              "Peso Objetivo": st.column_config.NumberColumn(format="%.1f%%"),
