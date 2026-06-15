@@ -2167,7 +2167,13 @@ def tab_dashboard() -> None:
     if (_end_dash - _start_dash).days > 540:
         _start_dash = _end_dash - timedelta(days=540)
 
-    _all_dash_t = list(dict.fromkeys(tickers + [bench]))
+    # Todos los tickers que hayan aparecido en transacciones (incluidos los vendidos)
+    # son necesarios para calcular el NAV histórico correcto.
+    _all_txn_t = (
+        _dash_txns["Ticker"].unique().tolist()
+        if not _dash_txns.empty else []
+    )
+    _all_dash_t = list(dict.fromkeys(_all_txn_t + tickers + [bench]))
     _h_dash = fetch_history(
         _all_dash_t,
         _start_dash.strftime("%Y-%m-%d"),
@@ -6073,7 +6079,17 @@ def tab_performance() -> None:
 
     bench   = st.session_state.get("benchmark", "SPY")
     rf_rate = st.session_state.get("rf_rate", 0.045)
-    tickers = hdf["Ticker"].unique().tolist()
+
+    # Incluir TODOS los tickers que hayan aparecido en transacciones,
+    # no solo los actuales. Si una acción fue vendida completamente,
+    # sus precios históricos siguen siendo necesarios para calcular
+    # el NAV de los períodos en que estuvo en el portafolio.
+    _txns_for_tickers = transactions_df()
+    _all_txn_tickers = (
+        _txns_for_tickers["Ticker"].unique().tolist()
+        if not _txns_for_tickers.empty else []
+    )
+    tickers = list(dict.fromkeys(_all_txn_tickers + hdf["Ticker"].unique().tolist()))
 
     # ── Fecha de inicio: primera transacción o fallback a 1 año ──
     txns = transactions_df()
