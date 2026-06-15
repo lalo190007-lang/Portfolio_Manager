@@ -705,13 +705,13 @@ def get_market_universe() -> list[str]:
         "BTC-USD","ETH-USD","SOL-USD",
         "AAPL","MSFT","AMZN","GOOGL","GOOG","META","TSLA","NVDA",
         "AMD","INTC","NFLX","ADBE","CRM","ORCL","CSCO","ACN",
-        "PLTR","SOFI","NU","COIN","HOOD","DKNG","ROKU",
+        "PLTR","SOFI","NU","COIN","HOOD","DKNG","ROKU", "KR",
         "JPM","BAC","WFC","C","GS","MS","V","MA","AXP",
         "JNJ","UNH","LLY","PFE","MRK","ABBV","TMO",
         "PG","KO","PEP","COST","WMT","TGT","HD","MCD",
         "XOM","CVX","COP","SLB","EOG","SHOP",
-        "BA","CAT","GE","LMT","RTX","HON",
-        "DIS","CMCSA","TMUS","VZ","T",
+        "BA","CAT","GE","LMT","RTX","HON", "SPCX",
+        "DIS","CMCSA","TMUS","VZ","T","SNDK","TTWO","INCY","FIX","ALL","ALB","CBOE", 
     ]
     try:
         url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
