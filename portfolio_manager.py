@@ -753,13 +753,7 @@ UNIVERSE: list[str] = get_market_universe()
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_live_prices(tickers: list[str]) -> dict:
-    """
-    Precios en tiempo real vía batch yf.download (period='2d', interval='1d').
-    Durante horario de mercado yfinance incluye el bar parcial de hoy como
-    vals[-1] (precio actual) y el cierre de ayer como vals[-2].
-    Cuando solo hay 1 bar (arranque del día o ticker muy nuevo) se usa
-    fast_info.last_price para el precio y fast_info.previous_close para prev.
-    """
+    """Precios en tiempo real vía batch yf.download period='2d' interval='1d'."""
     prices: dict = {}
     if not tickers:
         return prices
@@ -767,14 +761,6 @@ def fetch_live_prices(tickers: list[str]) -> dict:
     if not clean:
         return prices
 
-    # Fecha de hoy en hora del mercado (Eastern)
-    try:
-        today_date = pd.Timestamp.now(tz="America/New_York").date()
-    except Exception:
-        today_date = pd.Timestamp.now().date()
-
-    # ── Batch diario — igual que el código original que funcionaba ──
-    close_df = pd.DataFrame()
     try:
         raw = yf.download(
             clean, period="2d", interval="1d",
@@ -786,91 +772,29 @@ def fetch_live_prices(tickers: list[str]) -> dict:
                 close_df = raw["Close"]
             elif len(clean) == 1:
                 close_df = raw[["Close"]].rename(columns={"Close": clean[0]})
+            else:
+                close_df = raw
+            for t in clean:
+                if t in close_df.columns:
+                    vals = close_df[t].dropna()
+                    if not vals.empty:
+                        price = float(vals.iloc[-1])
+                        prev  = float(vals.iloc[-2]) if len(vals) >= 2 else price
+                        prices[t] = {"price": price, "prev_close": prev}
     except Exception:
         pass
 
-    # Tickers que necesitan fast_info solo para el PRECIO (prev_close viene del daily)
-    needs_live_price: list[str] = []
-    # Tickers que no tienen ningún dato daily
-    needs_full_fallback: list[str] = []
-
-    for t in clean:
-        if not close_df.empty and t in close_df.columns:
-            vals = close_df[t].dropna()
-            if len(vals) == 0:
-                needs_full_fallback.append(t)
-                continue
-
-            # ¿El último bar es de hoy? → yfinance ya incluyó el bar parcial actual
-            try:
-                last_idx = vals.index[-1]
-                last_date = (last_idx.date() if hasattr(last_idx, "date")
-                             else pd.Timestamp(last_idx).date())
-            except Exception:
-                last_date = None
-
-            if last_date == today_date and len(vals) >= 2:
-                # Bar de hoy incluido: vals[-1]=precio actual, vals[-2]=cierre ayer
-                prices[t] = {
-                    "price":      float(vals.iloc[-1]),
-                    "prev_close": float(vals.iloc[-2]),
-                }
-            elif last_date == today_date and len(vals) == 1:
-                # Solo el bar de hoy (ticker recién listado hoy mismo)
-                prices[t] = {"price": float(vals.iloc[0]), "prev_close": float(vals.iloc[0])}
-                needs_live_price.append(t)
-            else:
-                # Bar de hoy NO incluido (IPO reciente, primeros minutos del día, etc.)
-                # vals[-1] ES el cierre de ayer → usarlo como prev_close
-                # y pedir el precio actual a fast_info
-                prices[t] = {
-                    "price":      float(vals.iloc[-1]),   # placeholder
-                    "prev_close": float(vals.iloc[-1]),   # cierre de ayer ✓
-                }
-                needs_live_price.append(t)
-        else:
-            needs_full_fallback.append(t)
-
-    # ── fast_info en paralelo solo para lo que falta ─────────────────
-    import concurrent.futures
-
-    def _get_price_only(t: str):
-        """Devuelve solo last_price; prev_close ya lo tenemos del daily."""
-        try:
-            lp = yf.Ticker(t).fast_info.last_price
-            return t, float(lp) if lp is not None else 0.0
-        except Exception:
-            return t, 0.0
-
-    def _get_full(t: str):
+    # Fallback individual para tickers sin datos en el batch
+    missing = [t for t in clean if t not in prices or prices[t]["price"] == 0]
+    for t in missing:
         try:
             fi = yf.Ticker(t).fast_info
-            lp = fi.last_price
-            pc = fi.previous_close
-            return t, {
-                "price":      float(lp if lp is not None else 0),
-                "prev_close": float(pc if pc is not None else 0),
+            prices[t] = {
+                "price":      float(fi.last_price     or 0),
+                "prev_close": float(fi.previous_close or 0),
             }
         except Exception:
-            return t, {"price": 0.0, "prev_close": 0.0}
-
-    all_tasks = needs_live_price + needs_full_fallback
-    if all_tasks:
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(len(all_tasks), 12)
-        ) as ex:
-            price_futs  = {ex.submit(_get_price_only, t): t for t in needs_live_price}
-            full_futs   = {ex.submit(_get_full, t):       t for t in needs_full_fallback}
-
-            for fut, t in price_futs.items():
-                _, lp = fut.result()
-                if lp > 0:
-                    prices[t]["price"] = lp   # prev_close ya está del daily
-
-            for fut, t in full_futs.items():
-                data = fut.result()
-                if data["price"] > 0:
-                    prices[t] = data
+            prices[t] = {"price": 0.0, "prev_close": 0.0}
 
     return prices
 
