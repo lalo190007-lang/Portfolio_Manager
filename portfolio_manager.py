@@ -811,11 +811,23 @@ def fetch_live_prices(tickers: list[str]) -> dict:
 
         if last_date == today_date:
             if len(vals) >= 2:
-                # Caso ideal: bar de hoy + bar de ayer disponibles
-                prices[t] = {
-                    "price":      float(vals.iloc[-1]),
-                    "prev_close": float(vals.iloc[-2]),
-                }
+                # Verificar que vals[-2] sea realmente el día anterior
+                # (no un bar de hace varios días por historial incompleto/IPO reciente)
+                try:
+                    gap = (vals.index[-1].date() - vals.index[-2].date()).days
+                except Exception:
+                    gap = 1
+                if gap <= 3:
+                    # Gap normal (incluyendo fin de semana viernes→lunes)
+                    prices[t] = {
+                        "price":      float(vals.iloc[-1]),
+                        "prev_close": float(vals.iloc[-2]),
+                    }
+                else:
+                    # Gap anormal: faltan barras intermedias (ej. IPO reciente)
+                    # Usar fast_info para el prev_close correcto
+                    prices[t] = {"price": float(vals.iloc[-1]), "prev_close": 0.0}
+                    needs_prev_close.append(t)
             else:
                 # Solo bar de hoy (primer día de cotización)
                 prices[t] = {"price": float(vals.iloc[-1]), "prev_close": 0.0}
