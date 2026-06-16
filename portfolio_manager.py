@@ -754,15 +754,13 @@ UNIVERSE: list[str] = get_market_universe()
 @st.cache_data(ttl=90, show_spinner=False)
 def fetch_live_prices(tickers: list[str]) -> dict:
     """
-    Precios en tiempo real usando batch yf.download (mucho más rápido
-    que llamar Ticker(t).fast_info en un loop).
-    TTL 90s — equilibrio entre frescura y velocidad.
-
-    Usa una sola descarga diaria para que price y prev_close estén
-    en la misma base de ajuste y nunca haya discrepancias.
-    Si el bar más reciente coincide con prev_close (mercado abierto pero
-    yfinance aún no publicó el bar de hoy), se actualiza solo el precio
-    con fast_info.last_price para reflejar el movimiento intradiario.
+    Precios en tiempo real.
+    - Descarga 5d de datos diarios para tener buffer ante fines de semana/feriados.
+    - Verifica la FECHA del último bar:
+        · Si es HOY → yfinance ya incluye el bar parcial; price=hoy, prev=ayer.
+        · Si es un día anterior → solo hay cierres pasados; prev=último cierre,
+          price se obtiene con fast_info.last_price (tiempo real, sin mezclar bases).
+    Esto evita comparar "ayer vs anteayer" que produce cambios multi-día erróneos.
     """
     prices = {}
     if not tickers:
@@ -771,8 +769,16 @@ def fetch_live_prices(tickers: list[str]) -> dict:
     if not clean:
         return prices
 
+    # Fecha de hoy en hora del mercado (Eastern)
     try:
-        # Misma base de ajuste para price y prev_close → sin distorsiones
+        import pytz
+        today_date = pd.Timestamp.now(tz="America/New_York").date()
+    except Exception:
+        today_date = pd.Timestamp.now().date()
+
+    needs_live_price: set[str] = set()
+
+    try:
         raw = yf.download(
             clean, period="5d", interval="1d",
             auto_adjust=True, prepost=False,
@@ -781,49 +787,60 @@ def fetch_live_prices(tickers: list[str]) -> dict:
         if not raw.empty:
             if isinstance(raw.columns, pd.MultiIndex):
                 close_df = raw["Close"]
+            elif len(clean) == 1:
+                close_df = raw[["Close"]].rename(columns={"Close": clean[0]})
             else:
-                close_df = raw[["Close"]].rename(
-                    columns={"Close": clean[0]}) if len(clean) == 1 else raw
+                close_df = raw
 
             for t in clean:
-                if t in close_df.columns:
-                    vals = close_df[t].dropna()
-                    if len(vals) >= 2:
-                        price = float(vals.iloc[-1])
-                        prev  = float(vals.iloc[-2])
-                    elif len(vals) == 1:
-                        price = float(vals.iloc[0])
-                        prev  = price
-                    else:
-                        continue
-                    prices[t] = {"price": price, "prev_close": prev}
+                if t not in close_df.columns:
+                    continue
+                vals = close_df[t].dropna()
+                if len(vals) == 0:
+                    continue
+
+                # Fecha del bar más reciente
+                last_idx = vals.index[-1]
+                try:
+                    last_date = (last_idx.date() if hasattr(last_idx, "date")
+                                 else pd.Timestamp(last_idx).date())
+                except Exception:
+                    last_date = None
+
+                if last_date == today_date and len(vals) >= 2:
+                    # Hoy ya tiene bar parcial — datos correctos directamente
+                    prices[t] = {
+                        "price":      float(vals.iloc[-1]),
+                        "prev_close": float(vals.iloc[-2]),
+                    }
+                elif len(vals) >= 1:
+                    # Último bar es de un día anterior → es el prev_close
+                    # Necesitamos fast_info para el precio de hoy
+                    prices[t] = {
+                        "price":      float(vals.iloc[-1]),   # placeholder
+                        "prev_close": float(vals.iloc[-1]),
+                    }
+                    needs_live_price.add(t)
     except Exception:
-        pass
+        needs_live_price = set(clean)
 
-    # Si price == prev_close, el bar de hoy aún no está en datos diarios
-    # (mercado abierto). Actualizamos solo el precio con fast_info — mismo
-    # prev_close para no introducir bases de ajuste distintas.
-    stale = [t for t in clean
-             if t in prices and prices[t]["price"] == prices[t]["prev_close"]]
-    for t in stale:
-        try:
-            lp = float(yf.Ticker(t).fast_info.last_price or 0)
-            if lp > 0:
-                prices[t]["price"] = lp
-        except Exception:
-            pass
+    # Tickers que no entraron al batch tampoco tienen precio
+    needs_live_price |= {t for t in clean if t not in prices}
 
-    # Fallback individual para tickers que fallaron en el batch
-    missing = [t for t in clean if t not in prices or prices[t]["price"] == 0]
-    for t in missing:
+    # Obtener precio actual con fast_info (siempre refleja el tick más reciente)
+    for t in needs_live_price:
         try:
-            fi = yf.Ticker(t).fast_info
-            prices[t] = {
-                "price":      float(fi.last_price      or 0),
-                "prev_close": float(fi.previous_close  or 0),
-            }
+            fi  = yf.Ticker(t).fast_info
+            lp  = float(fi.last_price      or 0)
+            pc  = float(fi.previous_close  or 0)
+            if t in prices and prices[t]["prev_close"] > 0:
+                # Conservar prev_close de los datos diarios (más confiable)
+                prices[t]["price"] = lp if lp > 0 else prices[t]["price"]
+            else:
+                prices[t] = {"price": lp, "prev_close": pc}
         except Exception:
-            prices[t] = {"price": 0.0, "prev_close": 0.0}
+            if t not in prices:
+                prices[t] = {"price": 0.0, "prev_close": 0.0}
 
     return prices
 
