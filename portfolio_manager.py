@@ -751,7 +751,7 @@ UNIVERSE: list[str] = get_market_universe()
 # CAPA DE DATOS
 # ─────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def fetch_live_prices(tickers: list[str]) -> dict:
     """
     Precios en tiempo real.
@@ -7387,6 +7387,9 @@ def fetch_stock_full(ticker: str) -> dict:
         out["ok"] = True
     except Exception as e:
         out["error"] = str(e)
+        # Re-raise para que @st.cache_data NO guarde el fallo en caché —
+        # así el próximo intento del usuario vuelve a llamar a Yahoo Finance
+        raise RuntimeError(str(e)) from e
 
     return out
 
@@ -7572,13 +7575,25 @@ def tab_stock_deep_dive() -> None:
     cache_key = f"deepdive_{selected}"
     if run_btn or cache_key not in st.session_state:
         with st.spinner(f"Recopilando todos los datos de {selected}…"):
-            d = fetch_stock_full(selected)
-        st.session_state[cache_key] = d
+            try:
+                d = fetch_stock_full(selected)
+                st.session_state[cache_key] = d
+            except Exception as e:
+                err_msg = str(e)
+                # No guardar el error en session_state para que el usuario pueda reintentar
+                if "rate" in err_msg.lower() or "too many" in err_msg.lower() or "429" in err_msg:
+                    st.error(
+                        f"Yahoo Finance está limitando las peticiones. "
+                        f"Espera unos minutos y presiona **Analizar** de nuevo."
+                    )
+                else:
+                    st.error(f"No se pudieron obtener datos: {err_msg}")
+                return
     else:
         d = st.session_state[cache_key]
 
-    if not d.get("ok"):
-        st.error(f"No se pudieron obtener datos: {d.get('error','desconocido')}")
+    if not d or not d.get("ok"):
+        st.error(f"No se pudieron obtener datos: {d.get('error','desconocido') if d else 'sin datos'}")
         return
 
     # Datos de la posición del usuario
