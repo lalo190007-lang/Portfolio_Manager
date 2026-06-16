@@ -863,7 +863,7 @@ def fetch_live_prices(tickers: list[str]) -> dict:
             full_futs   = {ex.submit(_get_full, t):       t for t in needs_full_fallback}
 
             for fut, t in price_futs.items():
-                lp = fut.result()
+                _, lp = fut.result()
                 if lp > 0:
                     prices[t]["price"] = lp   # prev_close ya está del daily
 
