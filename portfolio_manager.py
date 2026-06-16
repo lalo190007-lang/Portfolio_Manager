@@ -6884,7 +6884,14 @@ def tab_analytics() -> None:
 
     # ── Contribución al riesgo ────────────────────────────────
     section("CONTRIBUCIÓN AL RIESGO DEL PORTAFOLIO")
-    tickers_with_data = [t for t in tickers if t in returns_df.columns]
+    # Excluir tickers con historial insuficiente (ej. IPOs recientes)
+    tickers_with_data = [
+        t for t in tickers
+        if t in returns_df.columns and returns_df[t].dropna().shape[0] >= 20
+    ]
+    excluded_rc = [t for t in tickers if t not in tickers_with_data and t in returns_df.columns]
+    if excluded_rc:
+        st.caption(f"Excluidos por historial insuficiente (<20 días): {', '.join(excluded_rc)}")
     if len(tickers_with_data) >= 2:
         prices_live = fetch_live_prices(tickers_with_data)
         nav = sum(
