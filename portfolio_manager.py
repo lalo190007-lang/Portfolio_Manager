@@ -751,12 +751,16 @@ UNIVERSE: list[str] = get_market_universe()
 # CAPA DE DATOS
 # ─────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=90, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_live_prices(tickers: list[str]) -> dict:
     """
-    Precios en tiempo real usando batch yf.download (mucho más rápido
-    que llamar Ticker(t).fast_info en un loop).
-    TTL 90s — equilibrio entre frescura y velocidad.
+    Precios en tiempo real.
+    - price      → último bar intraday (interval=2m) para reflejar el precio actual
+    - prev_close → penúltimo cierre diario (interval=1d, confiable)
+
+    Razón: interval="1d" durante horario de mercado devuelve solo el cierre
+    de ayer (el día actual no está cerrado), causando price==prev_close → 0%.
+    Con interval="2m" obtenemos el tick más reciente de la sesión.
     """
     prices = {}
     if not tickers:
@@ -765,30 +769,62 @@ def fetch_live_prices(tickers: list[str]) -> dict:
     if not clean:
         return prices
 
+    # ── Precio live: intraday 2m (refresca cada minuto en yfinance) ──
+    intra_close = pd.DataFrame()
     try:
-        # Batch download: 2 días de datos diarios para tener hoy + ayer
-        raw = yf.download(
-            clean, period="2d", interval="1d",
+        raw_i = yf.download(
+            clean, period="1d", interval="2m",
             auto_adjust=True, prepost=False,
             progress=False, threads=True,
         )
-        if not raw.empty:
-            if isinstance(raw.columns, pd.MultiIndex):
-                close_df = raw["Close"]
-            else:
-                close_df = raw[["Close"]].rename(
-                    columns={"Close": clean[0]}) if len(clean) == 1 else raw
-
-            for t in clean:
-                if t in close_df.columns:
-                    vals = close_df[t].dropna()
-                    price = float(vals.iloc[-1]) if len(vals) >= 1 else 0.0
-                    prev  = float(vals.iloc[-2]) if len(vals) >= 2 else price
-                    prices[t] = {"price": price, "prev_close": prev}
+        if not raw_i.empty:
+            intra_close = (
+                raw_i["Close"] if isinstance(raw_i.columns, pd.MultiIndex)
+                else raw_i[["Close"]].rename(columns={"Close": clean[0]})
+                if len(clean) == 1 else raw_i
+            )
     except Exception:
         pass
 
-    # Fallback individual para tickers que fallaron en el batch
+    # ── Cierre anterior: datos diarios (referencia estable) ──────
+    daily_close = pd.DataFrame()
+    try:
+        raw_d = yf.download(
+            clean, period="5d", interval="1d",
+            auto_adjust=True, prepost=False,
+            progress=False, threads=True,
+        )
+        if not raw_d.empty:
+            daily_close = (
+                raw_d["Close"] if isinstance(raw_d.columns, pd.MultiIndex)
+                else raw_d[["Close"]].rename(columns={"Close": clean[0]})
+                if len(clean) == 1 else raw_d
+            )
+    except Exception:
+        pass
+
+    for t in clean:
+        price = 0.0
+        prev_close = 0.0
+
+        # Precio: último bar intraday
+        if not intra_close.empty and t in intra_close.columns:
+            s = intra_close[t].dropna()
+            if not s.empty:
+                price = float(s.iloc[-1])
+
+        # Cierre anterior: penúltimo bar diario
+        if not daily_close.empty and t in daily_close.columns:
+            dc = daily_close[t].dropna()
+            if len(dc) >= 2:
+                prev_close = float(dc.iloc[-2])
+            elif len(dc) == 1:
+                prev_close = float(dc.iloc[0])
+
+        if price > 0:
+            prices[t] = {"price": price, "prev_close": prev_close}
+
+    # ── Fallback individual para tickers que fallaron en el batch ─
     missing = [t for t in clean if t not in prices or prices[t]["price"] == 0]
     for t in missing:
         try:
