@@ -751,13 +751,14 @@ UNIVERSE: list[str] = get_market_universe()
 # CAPA DE DATOS
 # ─────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=90, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_live_prices(tickers: list[str]) -> dict:
     """
-    Precios en tiempo real obtenidos con fast_info en paralelo.
-    fast_info.last_price      = precio actual del mercado (mismo que Yahoo Finance)
-    fast_info.previous_close  = cierre del día anterior (mismo que Yahoo Finance)
-    No hay cálculos de fechas ni mezcla de bases de ajuste.
+    Precios en tiempo real vía batch yf.download (period='2d', interval='1d').
+    Durante horario de mercado yfinance incluye el bar parcial de hoy como
+    vals[-1] (precio actual) y el cierre de ayer como vals[-2].
+    Cuando solo hay 1 bar (arranque del día o ticker muy nuevo) se usa
+    fast_info.last_price para el precio y fast_info.previous_close para prev.
     """
     prices: dict = {}
     if not tickers:
@@ -766,9 +767,47 @@ def fetch_live_prices(tickers: list[str]) -> dict:
     if not clean:
         return prices
 
+    # ── Batch diario — igual que el código original que funcionaba ──
+    close_df = pd.DataFrame()
+    try:
+        raw = yf.download(
+            clean, period="2d", interval="1d",
+            auto_adjust=True, prepost=False,
+            progress=False, threads=True,
+        )
+        if not raw.empty:
+            if isinstance(raw.columns, pd.MultiIndex):
+                close_df = raw["Close"]
+            elif len(clean) == 1:
+                close_df = raw[["Close"]].rename(columns={"Close": clean[0]})
+    except Exception:
+        pass
+
+    needs_fallback: list[str] = []
+    for t in clean:
+        if not close_df.empty and t in close_df.columns:
+            vals = close_df[t].dropna()
+            if len(vals) >= 2:
+                prices[t] = {
+                    "price":      float(vals.iloc[-1]),
+                    "prev_close": float(vals.iloc[-2]),
+                }
+            elif len(vals) == 1:
+                # Solo 1 bar: mercado recién abierto o ticker nuevo IPO
+                prices[t] = {
+                    "price":      float(vals.iloc[0]),
+                    "prev_close": float(vals.iloc[0]),
+                }
+                needs_fallback.append(t)
+            else:
+                needs_fallback.append(t)
+        else:
+            needs_fallback.append(t)
+
+    # ── Fallback con fast_info solo para tickers sin datos suficientes ──
     import concurrent.futures
 
-    def _fetch_one(t: str):
+    def _fast(t: str):
         try:
             fi = yf.Ticker(t).fast_info
             lp = fi.last_price
@@ -778,13 +817,15 @@ def fetch_live_prices(tickers: list[str]) -> dict:
                 "prev_close": float(pc if pc is not None else 0),
             }
         except Exception:
-            return t, {"price": 0.0, "prev_close": 0.0}
+            return t, prices.get(t, {"price": 0.0, "prev_close": 0.0})
 
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=min(len(clean), 12)
-    ) as ex:
-        for t, data in ex.map(_fetch_one, clean):
-            prices[t] = data
+    if needs_fallback:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(len(needs_fallback), 12)
+        ) as ex:
+            for t, data in ex.map(_fast, needs_fallback):
+                if data["price"] > 0:
+                    prices[t] = data
 
     return prices
 
