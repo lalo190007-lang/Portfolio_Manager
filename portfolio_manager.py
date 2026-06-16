@@ -753,7 +753,14 @@ UNIVERSE: list[str] = get_market_universe()
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_live_prices(tickers: list[str]) -> dict:
-    """Precios en tiempo real vía batch yf.download period='2d' interval='1d'."""
+    """
+    Precios en tiempo real.
+
+    Descarga 5d de datos diarios y verifica la fecha del último bar:
+    - Último bar = HOY  → price=hoy, prev_close=bar anterior (ayer)
+    - Último bar = AYER → tenemos el prev_close; pide precio actual con fast_info
+    - Último bar = HOY pero solo 1 bar → tenemos precio; pide prev_close con fast_info
+    """
     prices: dict = {}
     if not tickers:
         return prices
@@ -762,8 +769,14 @@ def fetch_live_prices(tickers: list[str]) -> dict:
         return prices
 
     try:
+        today_date = pd.Timestamp.now(tz="America/New_York").date()
+    except Exception:
+        today_date = pd.Timestamp.now().date()
+
+    close_df = pd.DataFrame()
+    try:
         raw = yf.download(
-            clean, period="2d", interval="1d",
+            clean, period="5d", interval="1d",
             auto_adjust=True, prepost=False,
             progress=False, threads=True,
         )
@@ -774,19 +787,61 @@ def fetch_live_prices(tickers: list[str]) -> dict:
                 close_df = raw[["Close"]].rename(columns={"Close": clean[0]})
             else:
                 close_df = raw
-            for t in clean:
-                if t in close_df.columns:
-                    vals = close_df[t].dropna()
-                    if not vals.empty:
-                        price = float(vals.iloc[-1])
-                        prev  = float(vals.iloc[-2]) if len(vals) >= 2 else price
-                        prices[t] = {"price": price, "prev_close": prev}
     except Exception:
         pass
 
-    # Fallback individual para tickers sin datos en el batch
-    missing = [t for t in clean if t not in prices or prices[t]["price"] == 0]
-    for t in missing:
+    needs_today_price: list[str] = []   # tienen prev_close, les falta el precio de hoy
+    needs_prev_close:  list[str] = []   # tienen precio de hoy, les falta prev_close
+    needs_full:        list[str] = []   # no tienen nada del batch
+
+    for t in clean:
+        if close_df.empty or t not in close_df.columns:
+            needs_full.append(t)
+            continue
+
+        vals = close_df[t].dropna()
+        if vals.empty:
+            needs_full.append(t)
+            continue
+
+        try:
+            last_date = vals.index[-1].date()
+        except Exception:
+            last_date = None
+
+        if last_date == today_date:
+            if len(vals) >= 2:
+                # Caso ideal: bar de hoy + bar de ayer disponibles
+                prices[t] = {
+                    "price":      float(vals.iloc[-1]),
+                    "prev_close": float(vals.iloc[-2]),
+                }
+            else:
+                # Solo bar de hoy (primer día de cotización)
+                prices[t] = {"price": float(vals.iloc[-1]), "prev_close": 0.0}
+                needs_prev_close.append(t)
+        else:
+            # El último bar disponible es de ayer o antes
+            # → usarlo como prev_close y pedir el precio actual
+            prices[t] = {"price": 0.0, "prev_close": float(vals.iloc[-1])}
+            needs_today_price.append(t)
+
+    # Pedir solo lo que falta con fast_info (llamadas individuales, no batch)
+    for t in needs_today_price:
+        try:
+            lp = yf.Ticker(t).fast_info.last_price
+            prices[t]["price"] = float(lp) if lp else prices[t]["prev_close"]
+        except Exception:
+            prices[t]["price"] = prices[t]["prev_close"]
+
+    for t in needs_prev_close:
+        try:
+            pc = yf.Ticker(t).fast_info.previous_close
+            prices[t]["prev_close"] = float(pc) if pc else prices[t]["price"]
+        except Exception:
+            prices[t]["prev_close"] = prices[t]["price"]
+
+    for t in needs_full:
         try:
             fi = yf.Ticker(t).fast_info
             prices[t] = {
