@@ -2583,34 +2583,37 @@ def tab_dashboard() -> None:
 
         # ── Mini SVG sparkline (180×54 — 50% más grande que antes) ─
         spark_svg = ""
-        if len(spark) >= 4:
-            w_svg, h_svg = 180, 54
-            lo, hi = min(spark), max(spark)
-            rng = hi - lo if hi != lo else 1.0
-            pts = " ".join(
-                f"{i*(w_svg/(len(spark)-1)):.1f},{h_svg - (v-lo)/rng*(h_svg-4):.1f}"
-                for i, v in enumerate(spark)
-            )
-            spark_clr = "#30d158" if chg >= 0 else "#ff453a"
-            fill_id   = f"sfill_{t.replace('-','')}"
-            fill_clr_a = "rgba(48,209,88,0.18)" if chg >= 0 else "rgba(255,69,58,0.12)"
-            pts_fill = (f"0,{h_svg} " + pts + f" {w_svg},{h_svg}")
-            # Add a horizontal baseline at last price
-            last_y = f"{h_svg - (spark[-1]-lo)/rng*(h_svg-4):.1f}"
-            spark_svg = (
-                f'<svg width="100%" height="{h_svg}" viewBox="0 0 {w_svg} {h_svg}" '
-                f'preserveAspectRatio="none" '
-                f'style="display:block;margin:8px 0 4px;overflow:visible;">'
-                f'<defs><linearGradient id="{fill_id}" x1="0" y1="0" x2="0" y2="1">'
-                f'<stop offset="0%" stop-color="{spark_clr}" stop-opacity=".22"/>'
-                f'<stop offset="100%" stop-color="{spark_clr}" stop-opacity="0"/>'
-                f'</linearGradient></defs>'
-                f'<polyline points="{pts_fill}" fill="url(#{fill_id})" stroke="none"/>'
-                f'<polyline points="{pts}" fill="none" stroke="{spark_clr}" '
-                f'stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>'
-                f'<circle cx="{w_svg}" cy="{last_y}" r="3" fill="{spark_clr}" opacity=".9"/>'
-                f'</svg>'
-            )
+        # Filtrar NaN/inf antes de generar el SVG (IPOs recientes pueden tener datos sucios)
+        spark_clean = [v for v in spark if isinstance(v, (int, float)) and np.isfinite(v)]
+        try:
+            if len(spark_clean) >= 4:
+                w_svg, h_svg = 180, 54
+                lo, hi = min(spark_clean), max(spark_clean)
+                rng = hi - lo if hi != lo else 1.0
+                pts = " ".join(
+                    f"{i*(w_svg/(len(spark_clean)-1)):.1f},{h_svg - (v-lo)/rng*(h_svg-4):.1f}"
+                    for i, v in enumerate(spark_clean)
+                )
+                spark_clr = "#30d158" if chg >= 0 else "#ff453a"
+                fill_id   = f"sfill_{t.replace('-','').replace('.','')}"
+                pts_fill  = (f"0,{h_svg} " + pts + f" {w_svg},{h_svg}")
+                last_y    = f"{h_svg - (spark_clean[-1]-lo)/rng*(h_svg-4):.1f}"
+                spark_svg = (
+                    f'<svg width="100%" height="{h_svg}" viewBox="0 0 {w_svg} {h_svg}" '
+                    f'preserveAspectRatio="none" '
+                    f'style="display:block;margin:8px 0 4px;overflow:visible;">'
+                    f'<defs><linearGradient id="{fill_id}" x1="0" y1="0" x2="0" y2="1">'
+                    f'<stop offset="0%" stop-color="{spark_clr}" stop-opacity=".22"/>'
+                    f'<stop offset="100%" stop-color="{spark_clr}" stop-opacity="0"/>'
+                    f'</linearGradient></defs>'
+                    f'<polyline points="{pts_fill}" fill="url(#{fill_id})" stroke="none"/>'
+                    f'<polyline points="{pts}" fill="none" stroke="{spark_clr}" '
+                    f'stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>'
+                    f'<circle cx="{w_svg}" cy="{last_y}" r="3" fill="{spark_clr}" opacity=".9"/>'
+                    f'</svg>'
+                )
+        except Exception:
+            spark_svg = ""
 
         # ── Colores según dirección ─────────────────────────────
         prev_clr = "#30d158" if chg_prev >= 0 else "#ff453a"
@@ -7522,7 +7525,7 @@ def _call_claude(prompt: str, max_tokens: int = 2000, system: str = "") -> str:
         "anthropic-version": "2023-06-01",
     }
     body = {
-        "model":      "claude-sonnet-4-20250514",
+        "model":      "claude-sonnet-4-6",
         "max_tokens": max_tokens,
         "messages":   [{"role": "user", "content": prompt}],
     }
