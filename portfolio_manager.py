@@ -2653,66 +2653,52 @@ def tab_dashboard() -> None:
             if has_open else ""
         )
 
-        cards_html += f"""
-<div class="mp-card" style="background:{bg};border:1px solid {brd};border-radius:18px;
-            padding:16px 18px 14px;display:flex;flex-direction:column;gap:0;min-width:0;">
+        badges_html = " ".join(b for b in [rsi_badge, chg1w_tag, sma_tag, vol_badge] if b)
 
-  <!-- Fila superior: ticker + cambio vs ayer -->
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px;">
-    <div>
-      <div style="font-family:DM Mono,monospace;font-weight:900;font-size:0.95rem;
-                  color:#ffffff;letter-spacing:0.2px;line-height:1;">{t}</div>
-      <div style="font-family:DM Mono,monospace;font-size:1.5rem;font-weight:700;
-                  color:#fff;line-height:1.1;margin-top:3px;letter-spacing:-1px;">
-        ${price:,.2f}</div>
-    </div>
-    <div style="text-align:right;">
-      <div style="font-family:DM Mono,monospace;font-size:1.3rem;font-weight:700;
-                  color:{prev_clr};line-height:1;">{prev_arr} {abs(chg_prev):.2%}</div>
-      <div style="font-size:0.6rem;color:#636366;margin-top:1px;font-family:DM Mono,monospace;">
-        vs cierre anterior</div>
-      {open_row}
-    </div>
-  </div>
-
-  <!-- Sparkline -->
-  {spark_svg}
-
-  <!-- Separador -->
-  <div style="height:1px;background:rgba(255,255,255,0.05);margin:4px 0;"></div>
-
-  <!-- Indicadores técnicos -->
-  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;">
-    {rsi_badge}
-    {chg1w_tag}
-    {sma_tag}
-    {vol_badge}
-  </div>
-
-  <!-- P&L + peso en cartera -->
-  <div style="display:flex;justify-content:space-between;align-items:center;
-              margin-top:8px;">
-    <div>
-      <div style="font-size:0.62rem;color:#636366;font-family:DM Mono,monospace;
-                  text-transform:uppercase;letter-spacing:.5px;">P&amp;L</div>
-      <div style="font-family:DM Mono,monospace;font-weight:700;font-size:0.88rem;
-                  color:{pnl_clr};">${pnl_val:+,.2f}</div>
-    </div>
-    <div style="text-align:right;">
-      <div style="font-size:0.62rem;color:#636366;font-family:DM Mono,monospace;
-                  text-transform:uppercase;letter-spacing:.5px;">CARTERA</div>
-      <div style="font-family:DM Mono,monospace;font-weight:700;font-size:0.88rem;
-                  color:#aeaeb2;">{float(row_data["Peso"]):.1%}</div>
-    </div>
-  </div>
-
-  <!-- Barra de peso en cartera -->
-  <div style="height:3px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:6px;overflow:hidden;">
-    <div style="height:100%;width:{weight_w}%;background:linear-gradient(90deg,{clr},rgba(255,255,255,.1));
-                border-radius:2px;transition:width .4s ease;"></div>
-  </div>
-
-</div>"""
+        cards_html += (
+            f'<div class="mp-card" style="background:{bg};border:1px solid {brd};border-radius:18px;'
+            f'padding:16px 18px 14px;display:flex;flex-direction:column;gap:0;min-width:0;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px;">'
+            f'<div>'
+            f'<div style="font-family:DM Mono,monospace;font-weight:900;font-size:0.95rem;'
+            f'color:#ffffff;letter-spacing:0.2px;line-height:1;">{t}</div>'
+            f'<div style="font-family:DM Mono,monospace;font-size:1.5rem;font-weight:700;'
+            f'color:#fff;line-height:1.1;margin-top:3px;letter-spacing:-1px;">'
+            f'${price:,.2f}</div>'
+            f'</div>'
+            f'<div style="text-align:right;">'
+            f'<div style="font-family:DM Mono,monospace;font-size:1.3rem;font-weight:700;'
+            f'color:{prev_clr};line-height:1;">{prev_arr} {abs(chg_prev):.2%}</div>'
+            f'<div style="font-size:0.6rem;color:#636366;margin-top:1px;font-family:DM Mono,monospace;">'
+            f'vs cierre anterior</div>'
+            f'{open_row}'
+            f'</div>'
+            f'</div>'
+            f'{spark_svg}'
+            f'<div style="height:1px;background:rgba(255,255,255,0.05);margin:4px 0;"></div>'
+            f'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;">'
+            f'{badges_html}'
+            f'</div>'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">'
+            f'<div>'
+            f'<div style="font-size:0.62rem;color:#636366;font-family:DM Mono,monospace;'
+            f'text-transform:uppercase;letter-spacing:.5px;">P&amp;L</div>'
+            f'<div style="font-family:DM Mono,monospace;font-weight:700;font-size:0.88rem;'
+            f'color:{pnl_clr};">${pnl_val:+,.2f}</div>'
+            f'</div>'
+            f'<div style="text-align:right;">'
+            f'<div style="font-size:0.62rem;color:#636366;font-family:DM Mono,monospace;'
+            f'text-transform:uppercase;letter-spacing:.5px;">CARTERA</div>'
+            f'<div style="font-family:DM Mono,monospace;font-weight:700;font-size:0.88rem;'
+            f'color:#aeaeb2;">{float(row_data["Peso"]):.1%}</div>'
+            f'</div>'
+            f'</div>'
+            f'<div style="height:3px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:6px;overflow:hidden;">'
+            f'<div style="height:100%;width:{weight_w}%;background:linear-gradient(90deg,{clr},rgba(255,255,255,.1));'
+            f'border-radius:2px;transition:width .4s ease;"></div>'
+            f'</div>'
+            f'</div>'
+        )
 
     if _pulse_table_mode:
         # ── Modo tabla compacta ───────────────────────────────
