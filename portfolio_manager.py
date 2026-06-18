@@ -2571,15 +2571,15 @@ def tab_dashboard() -> None:
 
         sma_tag = ""
         if sma is True:
-            sma_tag = "<span style='color:#86efac;font-size:0.68rem;'>↑ SMA20</span>"
+            sma_tag = '<span style="color:#86efac;font-size:0.68rem;">↑ SMA20</span>'
         elif sma is False:
-            sma_tag = "<span style='color:#ff453a;font-size:0.68rem;'>↓ SMA20</span>"
+            sma_tag = '<span style="color:#ff453a;font-size:0.68rem;">↓ SMA20</span>'
 
         chg1w_tag = ""
         if chg1w is not None:
             c1w = "#30d158" if chg1w >= 0 else "#ff453a"
-            chg1w_tag = (f"<span style='color:{c1w};font-size:0.72rem;"
-                         f"font-family:DM Mono,monospace;'>1S: {chg1w:+.1%}</span>")
+            chg1w_tag = (f'<span style="color:{c1w};font-size:0.72rem;'
+                         f'font-family:DM Mono,monospace;">1S: {chg1w:+.1%}</span>')
 
         # ── Mini SVG sparkline (180×54 — 50% más grande que antes) ─
         spark_svg = ""
@@ -2626,23 +2626,30 @@ def tab_dashboard() -> None:
         weight_w = min(100, int(float(row_data["Peso"]) * 100 * 4))  # scale for bar
 
         # RSI badge with background
-        rsi_badge = (
-            f"<span style='background:rgba({('48,209,88' if rsi_clr=='#30d158' or rsi_clr=='#86efac' else ('255,69,58' if rsi_clr=='#ff453a' else '142,142,147'))},.12);"
-            f"color:{rsi_clr};border:1px solid {rsi_clr}22;border-radius:5px;"
-            f"padding:1px 7px;font-size:0.68rem;font-family:DM Mono,monospace;"
-            f"font-weight:700;'>{rsi_txt}</span>"
-            if rsi is not None else ""
-        )
+        rsi_badge = ""
+        if rsi is not None:
+            if rsi_clr in ("#30d158", "#86efac"):
+                rsi_bg = "48,209,88"
+            elif rsi_clr == "#ff453a":
+                rsi_bg = "255,69,58"
+            else:
+                rsi_bg = "142,142,147"
+            rsi_badge = (
+                f'<span style="background:rgba({rsi_bg},.12);'
+                f'color:{rsi_clr};border:1px solid {rsi_clr}22;border-radius:5px;'
+                f'padding:1px 7px;font-size:0.68rem;font-family:DM Mono,monospace;'
+                f'font-weight:700;">{rsi_txt}</span>'
+            )
         vol_badge = (
-            f"<span style='color:#8e8e93;font-size:0.68rem;font-family:DM Mono,monospace;"
-            f"background:rgba(255,255,255,0.04);border-radius:5px;padding:1px 6px;'>{vol_txt}</span>"
+            f'<span style="color:#8e8e93;font-size:0.68rem;font-family:DM Mono,monospace;'
+            f'background:rgba(255,255,255,0.04);border-radius:5px;padding:1px 6px;">{vol_txt}</span>'
             if vol_txt else ""
         )
 
         open_row = (
-            f"<div style='font-size:0.68rem;color:{open_clr};font-family:DM Mono,monospace;"
-            f"margin-top:1px;opacity:.85;'>{open_arr} {abs(chg_open):.2%} "
-            f"<span style='color:#636366;font-size:.6rem;'>apertura</span></div>"
+            f'<div style="font-size:0.68rem;color:{open_clr};font-family:DM Mono,monospace;'
+            f'margin-top:1px;opacity:.85;">{open_arr} {abs(chg_open):.2%} '
+            f'<span style="color:#636366;font-size:.6rem;">apertura</span></div>'
             if has_open else ""
         )
 
