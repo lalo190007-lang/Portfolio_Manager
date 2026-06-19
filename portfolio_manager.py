@@ -42,6 +42,97 @@ _BANXICO_TOKEN_FILE  = os.path.join(PORTFOLIO_DIR, ".banxico_token")
 
 TRADING_DAYS = 252
 
+# ─────────────────────────────────────────────────────────────
+# CALENDARIO NYSE — FERIADOS 2025-2027
+# ─────────────────────────────────────────────────────────────
+_NYSE_HOLIDAYS: dict[date, str] = {
+    # 2025
+    date(2025, 1, 1):  "Año Nuevo",
+    date(2025, 1, 20): "Día de MLK Jr.",
+    date(2025, 2, 17): "Día de los Presidentes",
+    date(2025, 4, 18): "Viernes Santo",
+    date(2025, 5, 26): "Memorial Day",
+    date(2025, 6, 19): "Juneteenth",
+    date(2025, 7, 4):  "Día de la Independencia",
+    date(2025, 9, 1):  "Labor Day",
+    date(2025, 11, 27):"Thanksgiving",
+    date(2025, 12, 25):"Navidad",
+    # 2026
+    date(2026, 1, 1):  "Año Nuevo",
+    date(2026, 1, 19): "Día de MLK Jr.",
+    date(2026, 2, 16): "Día de los Presidentes",
+    date(2026, 4, 3):  "Viernes Santo",
+    date(2026, 5, 25): "Memorial Day",
+    date(2026, 6, 19): "Juneteenth",
+    date(2026, 7, 3):  "Día de la Independencia (obs.)",
+    date(2026, 9, 7):  "Labor Day",
+    date(2026, 11, 26):"Thanksgiving",
+    date(2026, 12, 25):"Navidad",
+    # 2027
+    date(2027, 1, 1):  "Año Nuevo",
+    date(2027, 1, 18): "Día de MLK Jr.",
+    date(2027, 2, 15): "Día de los Presidentes",
+    date(2027, 3, 26): "Viernes Santo",
+    date(2027, 5, 31): "Memorial Day",
+    date(2027, 6, 18): "Juneteenth (obs.)",
+    date(2027, 7, 5):  "Día de la Independencia (obs.)",
+    date(2027, 9, 6):  "Labor Day",
+    date(2027, 11, 25):"Thanksgiving",
+    date(2027, 12, 24):"Navidad (obs.)",
+}
+_NYSE_HOLIDAY_DATES = frozenset(_NYSE_HOLIDAYS.keys())
+
+
+def _get_market_status() -> dict:
+    """
+    Devuelve estado actual del mercado NYSE.
+    Keys: status ('open'|'pre'|'post'|'holiday'|'weekend'|'closed'),
+          holiday_name (str|None), next_open (date|None), is_trading_day (bool)
+    """
+    try:
+        now_et = pd.Timestamp.now(tz="America/New_York")
+    except Exception:
+        now_et = pd.Timestamp.now()
+    today = now_et.date()
+    weekday = now_et.weekday()  # 0=Mon … 6=Sun
+
+    if weekday >= 5:
+        status = "weekend"
+        holiday_name = "Fin de semana"
+        is_trading = False
+    elif today in _NYSE_HOLIDAY_DATES:
+        status = "holiday"
+        holiday_name = _NYSE_HOLIDAYS[today]
+        is_trading = False
+    else:
+        is_trading = True
+        hour_et = now_et.hour + now_et.minute / 60
+        if hour_et < 9.5:
+            status = "pre"
+        elif hour_et < 16.0:
+            status = "open"
+        else:
+            status = "post"
+        holiday_name = None
+
+    # Próximo día hábil
+    next_open = None
+    if not is_trading:
+        d = today + timedelta(days=1)
+        for _ in range(10):
+            if d.weekday() < 5 and d not in _NYSE_HOLIDAY_DATES:
+                next_open = d
+                break
+            d += timedelta(days=1)
+
+    return {
+        "status": status,
+        "holiday_name": holiday_name,
+        "is_trading_day": is_trading,
+        "next_open": next_open,
+        "date": today,
+    }
+
 
 # ─────────────────────────────────────────────────────────────
 # PERSISTENCIA DE CREDENCIALES
@@ -794,6 +885,9 @@ def fetch_live_prices(tickers: list[str]) -> dict:
     needs_prev_close:  list[str] = []   # tienen precio de hoy, les falta prev_close
     needs_full:        list[str] = []   # no tienen nada del batch
 
+    # Si hoy es feriado o fin de semana, el último bar disponible ya ES el precio correcto
+    is_trading_day = _get_market_status()["is_trading_day"]
+
     for t in clean:
         if close_df.empty or t not in close_df.columns:
             needs_full.append(t)
@@ -811,32 +905,44 @@ def fetch_live_prices(tickers: list[str]) -> dict:
 
         if last_date == today_date:
             if len(vals) >= 2:
-                # Verificar que vals[-2] sea realmente el día anterior
-                # (no un bar de hace varios días por historial incompleto/IPO reciente)
                 try:
                     gap = (vals.index[-1].date() - vals.index[-2].date()).days
                 except Exception:
                     gap = 1
                 if gap <= 3:
-                    # Gap normal (incluyendo fin de semana viernes→lunes)
                     prices[t] = {
                         "price":      float(vals.iloc[-1]),
                         "prev_close": float(vals.iloc[-2]),
                     }
                 else:
-                    # Gap anormal: faltan barras intermedias (ej. IPO reciente)
-                    # Usar fast_info para el prev_close correcto
                     prices[t] = {"price": float(vals.iloc[-1]), "prev_close": 0.0}
                     needs_prev_close.append(t)
             else:
-                # Solo bar de hoy (primer día de cotización)
                 prices[t] = {"price": float(vals.iloc[-1]), "prev_close": 0.0}
                 needs_prev_close.append(t)
         else:
-            # El último bar disponible es de ayer o antes
-            # → usarlo como prev_close y pedir el precio actual
-            prices[t] = {"price": 0.0, "prev_close": float(vals.iloc[-1])}
-            needs_today_price.append(t)
+            if not is_trading_day:
+                # Feriado o fin de semana: el último bar es el cierre del último día hábil
+                # — usarlo como precio actual y el bar anterior como prev_close
+                if len(vals) >= 2:
+                    try:
+                        gap = (vals.index[-1].date() - vals.index[-2].date()).days
+                    except Exception:
+                        gap = 1
+                    if gap <= 3:
+                        prices[t] = {
+                            "price":      float(vals.iloc[-1]),
+                            "prev_close": float(vals.iloc[-2]),
+                        }
+                    else:
+                        prices[t] = {"price": float(vals.iloc[-1]), "prev_close": 0.0}
+                        needs_prev_close.append(t)
+                else:
+                    prices[t] = {"price": float(vals.iloc[-1]), "prev_close": float(vals.iloc[-1])}
+            else:
+                # Día hábil: el bar de hoy aún no llegó (pre-mercado muy temprano)
+                prices[t] = {"price": 0.0, "prev_close": float(vals.iloc[-1])}
+                needs_today_price.append(t)
 
     # Pedir solo lo que falta con fast_info (llamadas individuales, no batch)
     for t in needs_today_price:
@@ -1985,6 +2091,58 @@ def tab_dashboard() -> None:
             pulse_shared = {}
     triggered = check_alerts(hdf, prices, pulse_shared)
     render_alerts_banner(triggered)
+
+    # ── Banner de mercado cerrado (feriado / fin de semana) ────
+    _mkt = _get_market_status()
+    if not _mkt["is_trading_day"]:
+        _day_names_es = {0:"Lunes",1:"Martes",2:"Miércoles",3:"Jueves",
+                         4:"Viernes",5:"Sábado",6:"Domingo"}
+        _month_names_es = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
+                           7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
+        def _fmt_date_es(d):
+            return f"{_day_names_es[d.weekday()]} {d.day} {_month_names_es[d.month]}"
+
+        _reason = _mkt["holiday_name"]
+        _next   = _mkt["next_open"]
+        _next_str = f" · Reabre {_fmt_date_es(_next)}" if _next else ""
+        st.markdown(
+            f'<div style="background:rgba(255,179,0,0.08);border:1px solid rgba(255,179,0,0.3);'
+            f'border-radius:12px;padding:10px 16px;margin-bottom:12px;'
+            f'display:flex;align-items:center;gap:10px;">'
+            f'<span style="font-size:1.2rem;">🏛️</span>'
+            f'<div>'
+            f'<span style="color:#ffb300;font-weight:700;font-family:DM Mono,monospace;'
+            f'font-size:0.82rem;">BOLSA CERRADA — {_reason.upper()}</span>'
+            f'<span style="color:#8e8e93;font-size:0.75rem;font-family:DM Mono,monospace;'
+            f'margin-left:10px;">Precios al cierre del último día hábil{_next_str}</span>'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Próximos feriados NYSE (90 días)
+        with st.expander("📅 Próximos feriados NYSE", expanded=False):
+            _today = _mkt["date"]
+            _upcoming = sorted(
+                [(d, n) for d, n in _NYSE_HOLIDAYS.items() if d >= _today],
+                key=lambda x: x[0]
+            )[:8]
+            if _upcoming:
+                _rows_html = "".join(
+                    f'<tr>'
+                    f'<td style="padding:5px 12px 5px 0;color:#aeaeb2;font-family:DM Mono,monospace;'
+                    f'font-size:0.78rem;white-space:nowrap;">{_fmt_date_es(d)}, {d.year}</td>'
+                    f'<td style="padding:5px 0;color:#ffffff;font-family:DM Mono,monospace;'
+                    f'font-size:0.78rem;">{"🔴 HOY — " if d == _today else ""}{n}</td>'
+                    f'</tr>'
+                    for d, n in _upcoming
+                )
+                st.markdown(
+                    f'<table style="border-collapse:collapse;">{_rows_html}</table>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.caption("No hay feriados registrados en los próximos 90 días.")
 
     # ── Calcular posiciones ────────────────────────────────────
     rows = []
