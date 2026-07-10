@@ -1318,40 +1318,33 @@ def delete_portfolio(name: str) -> None:
 # ─────────────────────────────────────────────────────────────
 
 def calculate_rebalance(
-    holdings: pd.DataFrame,           # cols: Ticker, Shares, AvgCost
-    target_weights: dict,             # {ticker: weight}  suma = 1.0
-    prices: dict,                     # {ticker: {"price": x}}
+    holdings: pd.DataFrame,
+    target_weights: dict,
+    prices: dict,
     new_capital: float = 0.0,
-    mode: str = "active",             # "active" | "passive"
-    min_trade_usd: float = 5.0,       # ignorar trades menores a este monto
+    mode: str = "active",
+    min_trade_usd: float = 5.0,
     commission_per_trade: float = 0.0,
+    drift_threshold: float = 0.0,   # no operar si |drift| < este valor (ej. 0.02 = 2%)
 ) -> dict:
     """
-    Calcula el rebalanceo de forma matemáticamente correcta y transparente.
-
-    Retorna un dict con todos los datos necesarios para mostrar y ejecutar.
+    Calcula el rebalanceo. Retorna trades con razón por operación y detección de swaps.
     """
     result = {
-        "ok": False,
-        "error": None,
-        "nav": 0.0,
-        "total_capital": 0.0,
-        "current_weights": {},
-        "target_weights": target_weights,
-        "trades": [],
-        "buys_total": 0.0,
-        "sells_total": 0.0,
-        "turnover": 0.0,
-        "estimated_commissions": 0.0,
+        "ok": False, "error": None,
+        "nav": 0.0, "total_capital": 0.0,
+        "current_weights": {}, "target_weights": target_weights,
+        "trades": [], "swap_pairs": [],
+        "buys_total": 0.0, "sells_total": 0.0,
+        "turnover": 0.0, "estimated_commissions": 0.0,
     }
 
-    # ── 1. Valores actuales por posición ──────────────────────────────
+    # ── 1. Valores actuales ───────────────────────────────────────────
     position_values: dict[str, float] = {}
     for _, row in holdings.iterrows():
         ticker = str(row.get("Ticker", "")).strip()
         shares = float(row.get("Shares", 0))
-        price_info = prices.get(ticker, {})
-        price = float(price_info.get("price", 0))
+        price  = float(prices.get(ticker, {}).get("price", 0))
         if ticker and price > 0:
             position_values[ticker] = shares * price
 
@@ -1368,66 +1361,118 @@ def calculate_rebalance(
     current_weights = {t: v / nav for t, v in position_values.items()} if nav > 0 else {}
     result["current_weights"] = current_weights
 
-    # ── 3. Validar pesos objetivo ─────────────────────────────────────
+    # ── 3. Validar y normalizar pesos objetivo ────────────────────────
     tw_sum = sum(target_weights.values())
     if abs(tw_sum - 1.0) > 0.02:
         result["error"] = f"Los pesos objetivo suman {tw_sum:.2%}, deben sumar 100%."
         return result
-
-    # Normalizar por si hay drift mínimo
     target_weights = {t: w / tw_sum for t, w in target_weights.items()}
 
-    # ── 4. Valores objetivo y delta ───────────────────────────────────
+    # ── 4. Calcular deltas y acciones ─────────────────────────────────
     all_tickers = set(list(position_values.keys()) + list(target_weights.keys()))
     trades = []
 
     for ticker in sorted(all_tickers):
-        current_val = position_values.get(ticker, 0.0)
+        current_val   = position_values.get(ticker, 0.0)
+        curr_w        = current_weights.get(ticker, 0.0)
         target_weight = target_weights.get(ticker, 0.0)
-        target_val = target_weight * total_capital
-        delta_val = target_val - current_val
+        target_val    = target_weight * total_capital
+        delta_val     = target_val - current_val
+        drift         = target_weight - curr_w
+        price         = float(prices.get(ticker, {}).get("price", 0))
+        is_existing   = ticker in position_values
 
-        price_info = prices.get(ticker, {})
-        price = float(price_info.get("price", 0))
-
-        # En modo pasivo: no vender
+        # Modo pasivo: no vender
         if mode == "passive" and delta_val < 0:
-            delta_val = 0.0
-            target_val = current_val
+            delta_val     = 0.0
+            target_val    = current_val
             target_weight = current_val / total_capital if total_capital > 0 else 0
 
-        shares_to_trade = delta_val / price if price > 0 else 0.0
-        action = "BUY" if delta_val > min_trade_usd else ("SELL" if delta_val < -min_trade_usd else "HOLD")
+        # Umbral de drift: no operar si el drift es pequeño en posiciones existentes
+        below_threshold = (drift_threshold > 0 and is_existing
+                           and abs(drift) < drift_threshold and target_weight > 0.001)
 
+        if below_threshold:
+            action = "HOLD"
+            delta_val = 0.0
+        elif delta_val > min_trade_usd:
+            action = "BUY"
+        elif delta_val < -min_trade_usd:
+            action = "SELL"
+        else:
+            action = "HOLD"
+
+        # Razón por operación — explica la decisión
+        if action == "BUY":
+            if not is_existing:
+                reason = f"Posición nueva · target {target_weight:.1%}"
+            elif new_capital > 0 and delta_val <= new_capital * 1.05:
+                reason = f"Subponderado {abs(drift):.1%} · {curr_w:.1%} → {target_weight:.1%} (capital nuevo)"
+            else:
+                reason = f"Subponderado {abs(drift):.1%} · {curr_w:.1%} → {target_weight:.1%}"
+        elif action == "SELL":
+            if target_weight < 0.005:
+                reason = "Liquidar posición · target 0%"
+            else:
+                reason = f"Sobreponderado {abs(drift):.1%} · {curr_w:.1%} → {target_weight:.1%}"
+        else:
+            if below_threshold:
+                reason = f"Drift {drift:+.1%} < umbral {drift_threshold:.1%} · sin cambio"
+            elif abs(delta_val) < min_trade_usd:
+                reason = f"Delta ${abs(delta_val):.0f} < mínimo ${min_trade_usd:.0f}"
+            else:
+                reason = f"En rango · drift {drift:+.1%}"
+
+        shares_to_trade = delta_val / price if price > 0 else 0.0
         trades.append({
-            "Ticker": ticker,
-            "Precio": price,
-            "Peso Actual": current_weights.get(ticker, 0.0),
+            "Ticker":        ticker,
+            "Precio":        price,
+            "Peso Actual":   curr_w,
             "Peso Objetivo": target_weight,
-            "Drift": target_weight - current_weights.get(ticker, 0.0),
-            "Val. Actual": current_val,
+            "Drift":         drift,
+            "Val. Actual":   current_val,
             "Val. Objetivo": target_val,
-            "Delta USD": delta_val,
-            "Acciones": shares_to_trade,
-            "Acción": action,
+            "Delta USD":     delta_val,
+            "Acciones":      shares_to_trade,
+            "Acción":        action,
+            "Razón":         reason,
         })
 
-    # Ordenar: primero ventas, luego compras, luego holds
-    order = {"SELL": 0, "BUY": 1, "HOLD": 2}
-    trades.sort(key=lambda x: (order.get(x["Acción"], 2), -abs(x["Delta USD"])))
-
+    # Ordenar: ventas → compras → holds (dentro de cada grupo, mayor monto primero)
+    _order = {"SELL": 0, "BUY": 1, "HOLD": 2}
+    trades.sort(key=lambda x: (_order.get(x["Acción"], 2), -abs(x["Delta USD"])))
     result["trades"] = trades
 
-    # ── 5. Métricas de rebalanceo ─────────────────────────────────────
-    buys  = sum(t["Delta USD"] for t in trades if t["Acción"] == "BUY")
-    sells = abs(sum(t["Delta USD"] for t in trades if t["Acción"] == "SELL"))
+    # ── 5. Detectar pares de swap (venta financia compra) ────────────
+    sells_list = [(t["Ticker"], abs(t["Delta USD"])) for t in trades if t["Acción"] == "SELL"]
+    buys_list  = [(t["Ticker"], t["Delta USD"])       for t in trades if t["Acción"] == "BUY"]
+    used_s, used_b = set(), set()
+    swap_pairs = []
+    for s_t, s_amt in sorted(sells_list, key=lambda x: -x[1]):
+        if s_t in used_s: continue
+        for b_t, b_amt in sorted(buys_list, key=lambda x: -x[1]):
+            if b_t in used_b: continue
+            if s_amt == 0 or b_amt == 0: continue
+            match_ratio = min(s_amt, b_amt) / max(s_amt, b_amt)
+            if match_ratio >= 0.30:
+                swap_pairs.append({
+                    "sell": s_t, "buy": b_t,
+                    "sell_usd": s_amt, "buy_usd": b_amt,
+                    "match": match_ratio,
+                })
+                used_s.add(s_t); used_b.add(b_t)
+                break
+    result["swap_pairs"] = swap_pairs
 
-    n_trades = sum(1 for t in trades if t["Acción"] != "HOLD")
-    result["buys_total"]  = buys
-    result["sells_total"] = sells
-    result["turnover"]    = sells / nav if nav > 0 else 0.0
-    result["estimated_commissions"] = n_trades * commission_per_trade
-    result["n_trades"] = n_trades
+    # ── 6. Métricas ───────────────────────────────────────────────────
+    buys_tot  = sum(t["Delta USD"]       for t in trades if t["Acción"] == "BUY")
+    sells_tot = abs(sum(t["Delta USD"]   for t in trades if t["Acción"] == "SELL"))
+    n_trades  = sum(1                    for t in trades if t["Acción"] != "HOLD")
+    result["buys_total"]             = buys_tot
+    result["sells_total"]            = sells_tot
+    result["turnover"]               = sells_tot / nav if nav > 0 else 0.0
+    result["estimated_commissions"]  = n_trades * commission_per_trade
+    result["n_trades"]               = n_trades
     result["ok"] = True
     return result
 
@@ -4499,6 +4544,13 @@ def tab_rebalance() -> None:
                                               value=0.0, step=0.5, key="reb1_comm")
                 min_trade   = st.number_input("Monto mínimo op. ($):", min_value=1.0,
                                               value=10.0, key="reb1_min")
+                drift_thr   = st.slider(
+                    "Umbral de drift (no operar si drift < X%):",
+                    min_value=0, max_value=15, value=0, step=1, key="reb1_drift",
+                    help="Si una posición tiene un drift menor a este porcentaje, "
+                         "se deja sin cambio. Útil para evitar trades pequeños innecesarios. "
+                         "Ej: 3% → solo opera si la posición está desviada más de 3 puntos.",
+                ) / 100.0
                 st.divider()
                 st.markdown("**Target weights:**")
                 for t, w in sorted(tw.items(), key=lambda x: -x[1]):
@@ -4521,6 +4573,7 @@ def tab_rebalance() -> None:
                             new_capital=new_capital,
                             mode="active" if is_active else "passive",
                             min_trade_usd=min_trade, commission_per_trade=commission,
+                            drift_threshold=drift_thr,
                         )
                         st.session_state["reb1_result"] = result
 
@@ -5470,115 +5523,211 @@ def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
         st.error(result.get("error", "Error desconocido."))
         return
 
-    k1, k2, k3, k4 = st.columns(4)
-    with k1: kpi_card("NAV Actual",      f"${result['nav']:,.0f}")
-    with k2: kpi_card("Capital Total",   f"${result['total_capital']:,.0f}",
+    # ── Métricas resumen ──────────────────────────────────────────────
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    with k1: kpi_card("NAV Actual",    f"${result['nav']:,.0f}")
+    with k2: kpi_card("Capital Total", f"${result['total_capital']:,.0f}",
                       f"+ ${new_capital:,.0f} nuevo" if new_capital > 0 else "")
-    with k3: kpi_card("Compras",  f"${result['buys_total']:,.0f}",  accent="#30d158")
-    with k4: kpi_card("Ventas",   f"${result['sells_total']:,.0f}", accent="#ff453a" if result["sells_total"] > 0 else "")
-
-    k5, k6, k7, _ = st.columns(4)
-    with k5: kpi_card("Turnover",    f"{result['turnover']:.1%}", accent="#ffd60a")
-    with k6: kpi_card("N° Trades",   str(result.get("n_trades", 0)))
-    with k7:
+    with k3: kpi_card("A comprar",  f"${result['buys_total']:,.0f}",  accent="#30d158")
+    with k4: kpi_card("A vender",   f"${result['sells_total']:,.0f}",
+                      accent="#ff453a" if result["sells_total"] > 0 else "")
+    with k5: kpi_card("Turnover",   f"{result['turnover']:.1%}", accent="#ffd60a")
+    with k6:
         comm = result.get("estimated_commissions", 0)
         kpi_card("Comisiones", f"${comm:.2f}" if comm > 0 else "—")
 
     trades = result.get("trades", [])
     if not trades:
-        st.success("Portafolio ya balanceado."); return
+        st.success("Portafolio ya balanceado.")
+        return
 
-    df_t = pd.DataFrame(trades)
-    df_t["_o"] = df_t["Acción"].map({"SELL":0,"BUY":1,"HOLD":2})
-    df_t = df_t.sort_values(["_o","Delta USD"], ascending=[True,True]).drop("_o", axis=1)
+    sells  = [t for t in trades if t["Acción"] == "SELL"]
+    buys   = [t for t in trades if t["Acción"] == "BUY"]
+    holds  = [t for t in trades if t["Acción"] == "HOLD"]
 
-    display = df_t[df_t["Acción"] != "HOLD"].copy()
-    if display.empty:
-        st.success("✅ Sin transacciones necesarias (dentro del umbral mínimo).")
-    else:
-        # Columna "Monto USD" = |Delta USD| — lo que debes ingresar en GBM
-        display["Monto USD"] = display["Delta USD"].abs()
+    if not sells and not buys:
+        st.success("✅ Sin transacciones necesarias (todos los drifts dentro del umbral).")
+        return
 
-        # ── Vista para EJECUTAR en broker (Ticker, Acción, Monto, Títulos) ──
+    # ── Swaps detectados ──────────────────────────────────────────────
+    swap_pairs = result.get("swap_pairs", [])
+    if swap_pairs:
+        swap_html = ""
+        for sp in swap_pairs:
+            pct = sp["match"] * 100
+            swap_html += (
+                f'<div style="display:flex;align-items:center;gap:12px;'
+                f'padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);">'
+                f'<div style="background:rgba(255,69,58,0.12);border:1px solid rgba(255,69,58,0.3);'
+                f'border-radius:8px;padding:6px 12px;font-family:DM Mono,monospace;'
+                f'font-weight:700;font-size:0.88rem;color:#ff453a;">'
+                f'VENDE {sp["sell"]}<br>'
+                f'<span style="font-size:0.72rem;font-weight:400;color:#ff7b73;">'
+                f'${sp["sell_usd"]:,.0f}</span></div>'
+                f'<div style="font-size:1.1rem;color:#8e8e93;">→</div>'
+                f'<div style="background:rgba(48,209,88,0.12);border:1px solid rgba(48,209,88,0.3);'
+                f'border-radius:8px;padding:6px 12px;font-family:DM Mono,monospace;'
+                f'font-weight:700;font-size:0.88rem;color:#30d158;">'
+                f'COMPRA {sp["buy"]}<br>'
+                f'<span style="font-size:0.72rem;font-weight:400;color:#7be09c;">'
+                f'${sp["buy_usd"]:,.0f}</span></div>'
+                f'<div style="font-size:0.72rem;color:#8e8e93;font-family:DM Mono,monospace;">'
+                f'{pct:.0f}% financiado</div>'
+                f'</div>'
+            )
         st.markdown(
-            "<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
-            "color:#636366;text-transform:uppercase;font-family:DM Mono,monospace;"
-            "margin-bottom:6px;'>ÓRDENES A EJECUTAR</div>",
-            unsafe_allow_html=True)
-
-        exec_view = display[["Ticker","Acción","Precio","Monto USD","Acciones"]].copy()
-        st.dataframe(
-            exec_view,
-            column_config={
-                "Ticker":    st.column_config.TextColumn("Ticker",   width="small"),
-                "Acción":    st.column_config.TextColumn("Acción",   width="small"),
-                "Precio":    st.column_config.NumberColumn("Precio", format="$%.2f"),
-                "Monto USD": st.column_config.NumberColumn(
-                    "💵 Monto a invertir",
-                    format="$%.2f",
-                    help="Este es el monto en USD que debes ingresar en GBM u otro broker",
-                ),
-                "Acciones":  st.column_config.NumberColumn("Títulos",format="%+.6f"),
-            },
-            hide_index=True, use_container_width=True,
+            f'<div style="background:rgba(255,214,10,0.06);border:1px solid rgba(255,214,10,0.2);'
+            f'border-radius:12px;padding:12px 16px;margin-bottom:16px;">'
+            f'<div style="font-size:0.62rem;font-weight:700;letter-spacing:1.5px;'
+            f'color:#ffd60a;text-transform:uppercase;font-family:DM Mono,monospace;'
+            f'margin-bottom:8px;">🔄 SWAP{"S" if len(swap_pairs)>1 else ""} DETECTADO{"S" if len(swap_pairs)>1 else ""} '
+            f'— la venta financia la compra</div>'
+            f'{swap_html}</div>',
+            unsafe_allow_html=True,
         )
 
-        st.caption(
-            "💡 En **GBM** y la mayoría de brokers usa la columna **Monto a invertir** — "
-            "ingresa ese valor en dólares en el campo de monto. "
-            "Los títulos son de referencia para brokers que operan por cantidad."
+    # ── Plan de ejecución: VENTAS | COMPRAS ──────────────────────────
+    def _trade_card(t: dict, is_sell: bool) -> str:
+        clr     = "#ff453a" if is_sell else "#30d158"
+        bg      = "rgba(255,69,58,0.07)" if is_sell else "rgba(48,209,88,0.07)"
+        brd     = "rgba(255,69,58,0.22)" if is_sell else "rgba(48,209,88,0.22)"
+        label   = "VENDER" if is_sell else "COMPRAR"
+        monto   = abs(t["Delta USD"])
+        acciones = abs(t.get("Acciones", 0))
+        drift_v = t.get("Drift", 0)
+        drift_s = f"{drift_v:+.1%}"
+        reason  = t.get("Razón", "")
+        return (
+            f'<div style="background:{bg};border:1px solid {brd};border-radius:10px;'
+            f'padding:12px 14px;margin-bottom:8px;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
+            f'<div style="font-family:DM Mono,monospace;font-weight:700;font-size:0.95rem;'
+            f'color:#ffffff;">{t["Ticker"]}</div>'
+            f'<div style="text-align:right;">'
+            f'<div style="font-family:DM Mono,monospace;font-weight:700;font-size:0.95rem;'
+            f'color:{clr};">${monto:,.0f}</div>'
+            f'<div style="font-size:0.65rem;color:#8e8e93;font-family:DM Mono,monospace;">'
+            f'{acciones:.4f} títulos</div>'
+            f'</div></div>'
+            f'<div style="font-size:0.7rem;color:#8e8e93;margin-top:4px;">{reason}</div>'
+            f'<div style="display:flex;gap:8px;margin-top:6px;align-items:center;">'
+            f'<span style="background:{brd};color:{clr};font-size:0.65rem;'
+            f'font-family:DM Mono,monospace;border-radius:4px;padding:2px 6px;">{label}</span>'
+            f'<span style="font-size:0.68rem;color:#636366;font-family:DM Mono,monospace;">'
+            f'drift {drift_s} · ${t["Precio"]:,.2f}/acción</span>'
+            f'</div></div>'
         )
 
-        # ── Vista completa con todos los datos ──────────────────
-        with st.expander("📋 Ver tabla completa con pesos y drift"):
+    if sells or buys:
+        col_sell, col_buy = st.columns(2, gap="medium")
+
+        with col_sell:
+            if sells:
+                st.markdown(
+                    f'<div style="font-size:0.62rem;font-weight:700;letter-spacing:1.5px;'
+                    f'color:#ff453a;text-transform:uppercase;font-family:DM Mono,monospace;'
+                    f'margin-bottom:10px;">PASO 1 — VENDER ({len(sells)} orden{"es" if len(sells)>1 else ""})'
+                    f'<span style="color:#636366;font-weight:400;margin-left:8px;">'
+                    f'${sum(abs(t["Delta USD"]) for t in sells):,.0f} total</span></div>',
+                    unsafe_allow_html=True,
+                )
+                cards_html = "".join(_trade_card(t, is_sell=True) for t in sells)
+                st.markdown(cards_html, unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    '<div style="color:#636366;font-size:0.82rem;padding:20px 0;'
+                    'text-align:center;">Sin ventas necesarias</div>',
+                    unsafe_allow_html=True,
+                )
+
+        with col_buy:
+            if buys:
+                st.markdown(
+                    f'<div style="font-size:0.62rem;font-weight:700;letter-spacing:1.5px;'
+                    f'color:#30d158;text-transform:uppercase;font-family:DM Mono,monospace;'
+                    f'margin-bottom:10px;">PASO 2 — COMPRAR ({len(buys)} orden{"es" if len(buys)>1 else ""})'
+                    f'<span style="color:#636366;font-weight:400;margin-left:8px;">'
+                    f'${sum(t["Delta USD"] for t in buys):,.0f} total</span></div>',
+                    unsafe_allow_html=True,
+                )
+                cards_html = "".join(_trade_card(t, is_sell=False) for t in buys)
+                st.markdown(cards_html, unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    '<div style="color:#636366;font-size:0.82rem;padding:20px 0;'
+                    'text-align:center;">Sin compras necesarias</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── Tabla de ejecución rápida (para copiar al broker) ────────────
+    all_active = sells + buys
+    if all_active:
+        st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
+        with st.expander("📋 Tabla de órdenes para el broker"):
+            exec_df = pd.DataFrame([{
+                "Ticker":  t["Ticker"],
+                "Acción":  t["Acción"],
+                "Monto $": abs(t["Delta USD"]),
+                "Títulos": abs(t.get("Acciones", 0)),
+                "Precio":  t["Precio"],
+                "Razón":   t.get("Razón",""),
+            } for t in all_active])
             st.dataframe(
-                display.drop("Monto USD", axis=1),
+                exec_df,
                 column_config={
-                    "Ticker":        st.column_config.TextColumn("Ticker",    width="small"),
-                    "Acción":        st.column_config.TextColumn("Acción",    width="small"),
-                    "Precio":        st.column_config.NumberColumn("Precio",  format="$%.2f"),
-                    "Peso Actual":   st.column_config.NumberColumn("Actual",  format="%.1f%%"),
-                    "Peso Objetivo": st.column_config.NumberColumn("Objetivo",format="%.1f%%"),
-                    "Drift":         st.column_config.NumberColumn("Drift",   format="%+.1f%%"),
-                    "Val. Actual":   st.column_config.NumberColumn("Actual $",format="$%.0f"),
-                    "Val. Objetivo": st.column_config.NumberColumn("Obj. $",  format="$%.0f"),
-                    "Delta USD":     st.column_config.NumberColumn("Delta",   format="$%+,.2f"),
-                    "Acciones":      st.column_config.NumberColumn("Títulos", format="%+.6f"),
+                    "Ticker":  st.column_config.TextColumn(width="small"),
+                    "Acción":  st.column_config.TextColumn(width="small"),
+                    "Monto $": st.column_config.NumberColumn("💵 Monto USD", format="$%.2f",
+                               help="Monto a ingresar en tu broker (GBM, etc.)"),
+                    "Títulos": st.column_config.NumberColumn(format="%.4f"),
+                    "Precio":  st.column_config.NumberColumn(format="$%.2f"),
+                    "Razón":   st.column_config.TextColumn("Por qué"),
                 },
                 hide_index=True, use_container_width=True,
             )
+            st.caption("💡 En GBM: usa la columna **Monto USD** — ingresa ese valor en el campo de monto en dólares.")
+            csv = exec_df.to_csv(index=False)
+            st.download_button("⬇️ Descargar plan (.csv)", data=csv,
+                               file_name=f"rebalanceo_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                               mime="text/csv")
 
-        csv = display.drop("Monto USD", axis=1).to_csv(index=False)
-        st.download_button("⬇️ Descargar plan (.csv)", data=csv,
-                           file_name=f"rebalanceo_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                           mime="text/csv")
+    # ── Sin cambio ────────────────────────────────────────────────────
+    if holds:
+        with st.expander(f"📌 Sin cambio — {len(holds)} posición{'es' if len(holds)>1 else ''}"):
+            holds_html = ""
+            for t in holds:
+                holds_html += (
+                    f'<div style="display:flex;justify-content:space-between;padding:6px 0;'
+                    f'border-bottom:1px solid rgba(255,255,255,0.04);font-family:DM Mono,monospace;">'
+                    f'<span style="font-weight:700;color:#ffffff;">{t["Ticker"]}</span>'
+                    f'<span style="color:#8e8e93;font-size:0.82rem;">{t.get("Razón","")}</span>'
+                    f'<span style="color:#aeaeb2;">${t["Val. Actual"]:,.0f} · {t["Peso Actual"]:.1%}</span>'
+                    f'</div>'
+                )
+            st.markdown(holds_html, unsafe_allow_html=True)
 
-    holds = df_t[df_t["Acción"] == "HOLD"].copy()
-    if not holds.empty:
-        with st.expander(f"📌 Sin cambio ({len(holds)})"):
-            st.dataframe(holds[["Ticker","Precio","Peso Actual","Peso Objetivo","Val. Actual"]],
-                         column_config={
-                             "Precio":        st.column_config.NumberColumn(format="$%.2f"),
-                             "Peso Actual":   st.column_config.NumberColumn(format="%.1f%%"),
-                             "Peso Objetivo": st.column_config.NumberColumn(format="%.1f%%"),
-                             "Val. Actual":   st.column_config.NumberColumn(format="$%.0f"),
-                         }, hide_index=True, use_container_width=True)
-
-    # Gráfico Before/After
-    cw = result["current_weights"]
-    tw = result["target_weights"]
+    # ── Gráfico antes / después ───────────────────────────────────────
+    st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
+    cw    = result["current_weights"]
+    tw    = result["target_weights"]
     all_t = sorted(set(list(cw.keys()) + list(tw.keys())))
     fig_ba = go.Figure()
-    fig_ba.add_trace(go.Bar(name="Actual",   x=all_t,
-                            y=[cw.get(t,0)*100 for t in all_t],
-                            marker_color="#0a84ff",
-                            hovertemplate="%{x}: %{y:.1f}%<extra>Actual</extra>"))
-    fig_ba.add_trace(go.Bar(name="Objetivo", x=all_t,
-                            y=[tw.get(t,0)*100 for t in all_t],
-                            marker_color="#30d158", opacity=0.75,
-                            hovertemplate="%{x}: %{y:.1f}%<extra>Objetivo</extra>"))
-    fig_ba.update_layout(**PLOTLY_LAYOUT, barmode="group",
-                         yaxis_title="Peso (%)", height=320)
+    fig_ba.add_trace(go.Bar(
+        name="Actual", x=all_t, y=[cw.get(t,0)*100 for t in all_t],
+        marker_color="#0a84ff",
+        hovertemplate="%{x}: %{y:.1f}%<extra>Actual</extra>",
+    ))
+    fig_ba.add_trace(go.Bar(
+        name="Objetivo", x=all_t, y=[tw.get(t,0)*100 for t in all_t],
+        marker_color="#30d158", opacity=0.80,
+        hovertemplate="%{x}: %{y:.1f}%<extra>Objetivo</extra>",
+    ))
+    fig_ba.update_layout(
+        **PLOTLY_LAYOUT, barmode="group",
+        yaxis_title="Peso (%)", height=300,
+        title="Asignación: actual vs objetivo",
+        legend=dict(orientation="h", y=1.05, x=0),
+    )
     st.plotly_chart(fig_ba, use_container_width=True, config=PLOTLY_CONFIG)
 
 
