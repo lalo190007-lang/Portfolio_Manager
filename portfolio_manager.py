@@ -1816,6 +1816,12 @@ def compute_positions(txns: pd.DataFrame) -> pd.DataFrame:
             positions[t]["shares"] = max(0.0, positions[t]["shares"] - shares)
             # El costo promedio NO cambia en ventas (método promedio ponderado)
 
+        elif ttype == "ADJUSTMENT":
+            # Sincronización con broker: sobreescribe completamente shares y costo promedio.
+            # Preserva historial anterior pero establece la verdad del broker como estado actual.
+            positions[t]["shares"]   = shares
+            positions[t]["avg_cost"] = price  # campo Price = costo promedio del broker
+
     rows = [
         {"Ticker": t, "Shares": round(p["shares"], 8), "AvgCost": p["avg_cost"]}
         for t, p in positions.items()
@@ -3716,8 +3722,9 @@ def tab_editor() -> None:
 
     # ── Panel derecho ─────────────────────────────────────────
     with col_right:
-        sub_tab_txn, sub_tab_pos, sub_tab_tw = st.tabs(
-            ["📋 Log de Transacciones", "📊 Posiciones Actuales", "🎯 Pesos Objetivo"]
+        sub_tab_txn, sub_tab_pos, sub_tab_sync, sub_tab_tw = st.tabs(
+            ["📋 Log de Transacciones", "📊 Posiciones Actuales",
+             "🔄 Sincronizar con Broker", "🎯 Pesos Objetivo"]
         )
 
         # ── Sub-tab: Log de transacciones ─────────────────────
@@ -3881,6 +3888,132 @@ def tab_editor() -> None:
                     f"P&L realizado (total): **${total_real_pos:+,.2f}**  ·  "
                     f"P&L combinado: **${total_unreal_pos + total_real_pos:+,.2f}**"
                 )
+
+        # ── Sub-tab: Sincronizar con broker ───────────────────
+        with sub_tab_sync:
+            section("SINCRONIZAR POSICIONES DESDE BROKER")
+            st.markdown(
+                '<div style="background:rgba(255,179,0,0.08);border:1px solid rgba(255,179,0,0.25);'
+                'border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:0.82rem;'
+                'color:#aeaeb2;">'
+                '⚡ <b style="color:#ffb300;">Corrección rápida sin tocar el historial.</b> '
+                'Ingresa los títulos y costo promedio exactamente como los muestra tu broker. '
+                'Se crea una transacción de tipo ADJUSTMENT que establece el estado correcto '
+                'manteniendo todo el historial anterior intacto.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            hdf_sync = holdings_df()
+            existing_tickers = hdf_sync["Ticker"].tolist() if not hdf_sync.empty else []
+
+            # Tabla editable: una fila por ticker actual + opción de agregar nuevos
+            extra_sync = st.text_input(
+                "Agregar tickers nuevos (coma):",
+                placeholder="AAPL, MSFT",
+                key="sync_extra_tickers",
+                help="Tickers que están en tu broker pero aún no están en la app",
+            )
+            extra_sync_list = [t.strip().upper() for t in extra_sync.split(",") if t.strip()]
+            sync_tickers = list(dict.fromkeys(existing_tickers + extra_sync_list))
+
+            if sync_tickers:
+                st.caption("Completa solo los tickers que necesitas corregir. Deja en blanco los que están bien.")
+
+                sync_data = []
+                for t in sync_tickers:
+                    row = hdf_sync[hdf_sync["Ticker"] == t].iloc[0] if t in existing_tickers else None
+                    sync_data.append({
+                        "Ticker":             t,
+                        "Títulos (broker)":   float(row["Shares"]) if row is not None else 0.0,
+                        "Cto. Prom. (broker)":float(row["AvgCost"]) if row is not None else 0.0,
+                        "Corregir":           False,
+                    })
+
+                sync_df_edit = pd.DataFrame(sync_data)
+                sync_edited = st.data_editor(
+                    sync_df_edit,
+                    column_config={
+                        "Ticker":              st.column_config.TextColumn("Ticker", disabled=True, width="small"),
+                        "Títulos (broker)":    st.column_config.NumberColumn(
+                            "Títulos reales", format="%.5f",
+                            help="Número exacto de títulos que muestra tu broker"),
+                        "Cto. Prom. (broker)": st.column_config.NumberColumn(
+                            "Costo Prom. $", format="$%.4f",
+                            help="Costo promedio por acción que muestra tu broker"),
+                        "Corregir":            st.column_config.CheckboxColumn(
+                            "✓ Corregir",
+                            help="Marca los tickers que quieres sincronizar",
+                            default=False,
+                        ),
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    key="sync_editor",
+                )
+
+                to_sync = sync_edited[sync_edited["Corregir"] == True]
+
+                if not to_sync.empty:
+                    st.markdown(
+                        f'<div style="background:rgba(48,209,88,0.07);border:1px solid rgba(48,209,88,0.2);'
+                        f'border-radius:8px;padding:10px 14px;margin:12px 0;font-size:0.82rem;">'
+                        f'Se aplicará ADJUSTMENT para <b style="color:#30d158;">'
+                        f'{len(to_sync)} ticker{"s" if len(to_sync)>1 else ""}</b>: '
+                        f'{", ".join(to_sync["Ticker"].tolist())}'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                col_btn, col_info = st.columns([1, 2])
+                with col_btn:
+                    apply_sync = st.button(
+                        "🔄 Aplicar Sincronización",
+                        type="primary",
+                        use_container_width=True,
+                        key="apply_broker_sync",
+                        disabled=to_sync.empty,
+                    )
+
+                if apply_sync and not to_sync.empty:
+                    txns_current = list(st.session_state.get("transactions", []))
+                    today_str    = str(date.today())
+                    n_applied    = 0
+                    for _, srow in to_sync.iterrows():
+                        ticker    = str(srow["Ticker"])
+                        shares    = float(srow["Títulos (broker)"])
+                        avg_cost  = float(srow["Cto. Prom. (broker)"])
+                        if shares <= 0 or avg_cost <= 0:
+                            st.warning(f"⚠️ {ticker}: títulos y costo deben ser > 0. Omitido.")
+                            continue
+                        txns_current.append({
+                            "Ticker": ticker,
+                            "Type":   "ADJUSTMENT",
+                            "Shares": shares,
+                            "Price":  avg_cost,
+                            "Date":   today_str,
+                            "Notes":  "Sincronización con broker",
+                        })
+                        n_applied += 1
+
+                    if n_applied > 0:
+                        st.session_state["transactions"] = txns_current
+                        port_name = st.session_state.get("active_portfolio", "")
+                        if port_name:
+                            save_portfolio(
+                                port_name, txns_current,
+                                st.session_state.get("target_weights", {}),
+                                st.session_state.get("benchmark", "SPY"),
+                            )
+                        st.success(
+                            f"✅ Sincronización aplicada: {n_applied} posición"
+                            f"{'es' if n_applied>1 else ''} actualizada"
+                            f"{'s' if n_applied>1 else ''}. "
+                            "El historial anterior se preservó."
+                        )
+                        st.rerun()
+            else:
+                st.info("Agrega posiciones en el formulario izquierdo primero.")
 
         # ── Sub-tab: Pesos objetivo ────────────────────────────
         with sub_tab_tw:
