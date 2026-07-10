@@ -802,7 +802,7 @@ def get_market_universe() -> list[str]:
         "PG","KO","PEP","COST","WMT","TGT","HD","MCD",
         "XOM","CVX","COP","SLB","EOG","SHOP",
         "BA","CAT","GE","LMT","RTX","HON", "SPCX",
-        "DIS","CMCSA","TMUS","VZ","T","SNDK","TTWO","INCY","FIX","ALL","ALB","CBOE", 
+        "DIS","CMCSA","TMUS","VZ","T","SNDK","TTWO","INCY","FIX","ALL","ALB","CBOE", "STX" ,
     ]
     try:
         url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
