@@ -5722,12 +5722,15 @@ def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
         marker_color="#30d158", opacity=0.80,
         hovertemplate="%{x}: %{y:.1f}%<extra>Objetivo</extra>",
     ))
-    fig_ba.update_layout(
-        **PLOTLY_LAYOUT, barmode="group",
-        yaxis_title="Peso (%)", height=300,
-        title="Asignación: actual vs objetivo",
-        legend=dict(orientation="h", y=1.05, x=0),
-    )
+    _ba_layout = dict(PLOTLY_LAYOUT)
+    _ba_layout.update({
+        "barmode": "group",
+        "yaxis_title": "Peso (%)",
+        "height": 300,
+        "title": "Asignación: actual vs objetivo",
+        "legend": dict(orientation="h", y=1.05, x=0),
+    })
+    fig_ba.update_layout(**_ba_layout)
     st.plotly_chart(fig_ba, use_container_width=True, config=PLOTLY_CONFIG)
 
 
