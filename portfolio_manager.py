@@ -860,9 +860,17 @@ def fetch_live_prices(tickers: list[str]) -> dict:
         return prices
 
     try:
-        today_date = pd.Timestamp.now(tz="America/New_York").date()
+        _ny_now    = pd.Timestamp.now(tz="America/New_York")
+        today_date = _ny_now.date()
+        # Si el mercado ya cerró (o aún no abrió), el último bar disponible
+        # es el precio vigente — no tiene sentido buscar un precio de "hoy"
+        # con fast_info que devolvería el mismo cierre.
+        _market_open  = _ny_now.replace(hour=9,  minute=30, second=0, microsecond=0)
+        _market_close = _ny_now.replace(hour=16, minute=0,  second=0, microsecond=0)
+        _market_currently_open = _market_open <= _ny_now <= _market_close
     except Exception:
         today_date = pd.Timestamp.now().date()
+        _market_currently_open = True  # asumir abierto si no podemos calcular
 
     close_df = pd.DataFrame()
     try:
@@ -939,10 +947,23 @@ def fetch_live_prices(tickers: list[str]) -> dict:
                         needs_prev_close.append(t)
                 else:
                     prices[t] = {"price": float(vals.iloc[-1]), "prev_close": float(vals.iloc[-1])}
-            else:
-                # Día hábil: el bar de hoy aún no llegó (pre-mercado muy temprano)
+            elif _market_currently_open:
+                # Mercado abierto ahora: el bar de hoy aún no llegó al batch diario
                 prices[t] = {"price": 0.0, "prev_close": float(vals.iloc[-1])}
                 needs_today_price.append(t)
+            else:
+                # Antes de apertura o después de cierre: el último bar es el precio vigente
+                if len(vals) >= 2:
+                    try:
+                        gap = (vals.index[-1].date() - vals.index[-2].date()).days
+                    except Exception:
+                        gap = 1
+                    prices[t] = {
+                        "price":      float(vals.iloc[-1]),
+                        "prev_close": float(vals.iloc[-2]) if gap <= 4 else float(vals.iloc[-1]),
+                    }
+                else:
+                    prices[t] = {"price": float(vals.iloc[-1]), "prev_close": float(vals.iloc[-1])}
 
     # Pedir solo lo que falta con fast_info (llamadas individuales, no batch)
     for t in needs_today_price:
@@ -7755,16 +7776,30 @@ def fetch_stock_full(ticker: str) -> dict:
         # ── Noticias ──────────────────────────────────────────
         try:
             news_raw = tk.news or []
-            out["news"] = [
-                {
-                    "title":     n.get("title", ""),
-                    "publisher": n.get("publisher", ""),
-                    "link":      n.get("link", ""),
-                    "age":       _news_age(n.get("providerPublishTime", 0)),
-                }
-                for n in news_raw[:8]
-                if n.get("title")
-            ]
+            out["news"] = []
+            for n in news_raw[:8]:
+                # yfinance >= 0.2.55 usa {"id":..., "content":{...}}
+                c = n.get("content") or n  # nuevo formato o legacy
+                title = c.get("title", "")
+                if not title:
+                    continue
+                provider   = (c.get("provider") or {}).get("displayName", "") or c.get("publisher", "")
+                url        = (c.get("canonicalUrl") or {}).get("url", "") or c.get("link", "")
+                pub_date   = c.get("pubDate", "")          # "2026-09-24T20:03:54Z"
+                legacy_ts  = n.get("providerPublishTime", 0)
+                if pub_date:
+                    try:
+                        ts = int(pd.Timestamp(pub_date).timestamp())
+                    except Exception:
+                        ts = legacy_ts
+                else:
+                    ts = legacy_ts
+                out["news"].append({
+                    "title":     title,
+                    "publisher": provider,
+                    "link":      url,
+                    "age":       _news_age(ts),
+                })
         except Exception:
             out["news"] = []
 
