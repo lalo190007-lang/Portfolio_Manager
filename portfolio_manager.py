@@ -7694,6 +7694,10 @@ def fetch_stock_full(ticker: str) -> dict:
         out["day_low"]    = float(info.get("dayLow")  or info.get("regularMarketDayLow")  or 0)
         out["wk52_high"]  = float(info.get("fiftyTwoWeekHigh") or 0)
         out["wk52_low"]   = float(info.get("fiftyTwoWeekLow")  or 0)
+
+        # Si Yahoo devolvió info vacío (tasa limitada, error temporal), forzar re-intento
+        if out["price"] == 0 and info.get("quoteType") in ("EQUITY", "ETF", None, ""):
+            raise ValueError(f"Yahoo Finance devolvió precio 0 para {ticker} — reintentando")
         out["volume"]     = info.get("regularMarketVolume") or info.get("volume") or 0
         out["avg_volume"] = info.get("averageVolume") or 1
         out["beta"]       = info.get("beta")
