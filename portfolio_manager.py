@@ -8042,7 +8042,7 @@ def tab_stock_deep_dive() -> None:
 
     # ── Selector ──────────────────────────────────────────────
     section("ANÁLISIS PROFUNDO POR ACCIÓN")
-    col_sel, col_run = st.columns([2, 1])
+    col_sel, col_run, col_clr = st.columns([2, 1, 1])
     with col_sel:
         selected = st.selectbox(
             "Selecciona la acción a analizar:",
@@ -8053,12 +8053,26 @@ def tab_stock_deep_dive() -> None:
         st.markdown("<br>", unsafe_allow_html=True)
         run_btn = st.button("🔬 Analizar", type="primary",
                             use_container_width=True, key="deepdive_run")
+    with col_clr:
+        st.markdown("<br>", unsafe_allow_html=True)
+        clear_btn = st.button("↻ Refrescar", use_container_width=True, key="deepdive_clear",
+                              help="Limpia el caché y descarga datos frescos de Yahoo Finance")
 
     st.divider()
 
     # ── Cargar datos ──────────────────────────────────────────
     cache_key = f"deepdive_{selected}"
+    if clear_btn:
+        # Limpiar caché completo de fetch_stock_full y session_state de este ticker
+        fetch_stock_full.clear()
+        st.session_state.pop(cache_key, None)
+        st.rerun()
+
     if run_btn or cache_key not in st.session_state:
+        if run_btn:
+            # Al hacer clic en Analizar, forzar datos frescos borrando el caché
+            fetch_stock_full.clear()
+            st.session_state.pop(cache_key, None)
         with st.spinner(f"Recopilando todos los datos de {selected}…"):
             try:
                 d = fetch_stock_full(selected)
@@ -8070,6 +8084,11 @@ def tab_stock_deep_dive() -> None:
                     st.error(
                         f"Yahoo Finance está limitando las peticiones. "
                         f"Espera unos minutos y presiona **Analizar** de nuevo."
+                    )
+                elif "precio 0" in err_msg.lower() or "precio" in err_msg.lower():
+                    st.warning(
+                        f"⚠️ Yahoo Finance devolvió datos incompletos para **{selected}**. "
+                        f"Espera unos segundos y presiona **↻ Refrescar** o **🔬 Analizar** de nuevo."
                     )
                 else:
                     st.error(f"No se pudieron obtener datos: {err_msg}")
