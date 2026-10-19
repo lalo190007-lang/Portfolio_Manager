@@ -31,7 +31,7 @@ st.set_page_config(
     page_title="Portfolio Manager",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",   # abierta en computadora, cerrada en celular
 )
 
 PORTFOLIO_DIR = "pm_portfolios"
@@ -41,6 +41,23 @@ _ANTHROPIC_KEY_FILE = os.path.join(PORTFOLIO_DIR, ".anthropic_key")
 _BANXICO_TOKEN_FILE  = os.path.join(PORTFOLIO_DIR, ".banxico_token")
 
 TRADING_DAYS = 252
+
+# El servidor de Streamlit Cloud corre en UTC; el usuario vive en CDMX.
+_MX_TZ = "America/Mexico_City"
+_NY_TZ = "America/New_York"
+
+
+def _now_mx() -> pd.Timestamp:
+    return pd.Timestamp.now(tz=_MX_TZ)
+
+
+def _today_mx() -> date:
+    return _now_mx().date()
+
+
+def _today_dt() -> datetime:
+    """datetime naive con la hora actual de CDMX (para rangos de históricos)."""
+    return _now_mx().tz_localize(None).to_pydatetime()
 
 # ─────────────────────────────────────────────────────────────
 # CALENDARIO NYSE — FERIADOS 2025-2027
@@ -80,58 +97,174 @@ _NYSE_HOLIDAYS: dict[date, str] = {
     date(2027, 11, 25):"Thanksgiving",
     date(2027, 12, 24):"Navidad (obs.)",
 }
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    """n-ésimo `weekday` (0=lun) del mes; n=-1 → el último."""
+    if n > 0:
+        d = date(year, month, 1)
+        d += timedelta(days=(weekday - d.weekday()) % 7)
+        return d + timedelta(weeks=n - 1)
+    d = date(year, month + 1, 1) - timedelta(days=1) if month < 12 else date(year, 12, 31)
+    return d - timedelta(days=(d.weekday() - weekday) % 7)
+
+
+def _easter(year: int) -> date:
+    a, b, c = year % 19, year // 100, year % 100
+    d, e = b // 4, b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def _observed(d: date) -> date:
+    """Sábado → viernes previo, domingo → lunes siguiente (regla NYSE)."""
+    if d.weekday() == 5:
+        return d - timedelta(days=1)
+    if d.weekday() == 6:
+        return d + timedelta(days=1)
+    return d
+
+
+def _nyse_holidays_for_year(y: int) -> dict[date, str]:
+    h = {}
+    ny = date(y, 1, 1)
+    if ny.weekday() != 5:          # Año Nuevo en sábado NO se recorre al 31-dic
+        h[_observed(ny)] = "Año Nuevo" + (" (obs.)" if _observed(ny) != ny else "")
+    h[_nth_weekday(y, 1, 0, 3)]  = "Día de MLK Jr."
+    h[_nth_weekday(y, 2, 0, 3)]  = "Día de los Presidentes"
+    h[_easter(y) - timedelta(days=2)] = "Viernes Santo"
+    h[_nth_weekday(y, 5, 0, -1)] = "Memorial Day"
+    for md, name in (((6, 19), "Juneteenth"), ((7, 4), "Día de la Independencia"),
+                     ((12, 25), "Navidad")):
+        d = date(y, *md)
+        h[_observed(d)] = name + (" (obs.)" if _observed(d) != d else "")
+    h[_nth_weekday(y, 9, 0, 1)]  = "Labor Day"
+    h[_nth_weekday(y, 11, 3, 4)] = "Thanksgiving"
+    return h
+
+
+def _nyse_early_closes_for_year(y: int) -> dict[date, str]:
+    """Sesiones que cierran a las 13:00 ET."""
+    e = {}
+    jul3, jul4 = date(y, 7, 3), date(y, 7, 4)
+    if jul3.weekday() < 4 and jul4.weekday() < 5:          # 3-jul lun-jue y 4-jul entre semana
+        e[jul3] = "Víspera de Independencia"
+    e[_nth_weekday(y, 11, 3, 4) + timedelta(days=1)] = "Día después de Thanksgiving"
+    dec24 = date(y, 12, 24)
+    if dec24.weekday() < 4:                                  # lun-jue (vie = feriado obs.)
+        e[dec24] = "Nochebuena"
+    return e
+
+
+_THIS_YEAR = pd.Timestamp.now(tz="America/New_York").year
+# La lista escrita a mano (2025-2027) manda; años siguientes se calculan por regla.
+for _y in range(2025, _THIS_YEAR + 4):
+    for _d, _n in _nyse_holidays_for_year(_y).items():
+        _NYSE_HOLIDAYS.setdefault(_d, _n)
 _NYSE_HOLIDAY_DATES = frozenset(_NYSE_HOLIDAYS.keys())
+_NYSE_EARLY_CLOSES: dict[date, str] = {}
+for _y in range(2025, _THIS_YEAR + 4):
+    _NYSE_EARLY_CLOSES.update(_nyse_early_closes_for_year(_y))
+
+# Reuniones de política monetaria de la Fed (anuncio el 2º día, 14:00 ET).
+# Fuente: calendario publicado por la Reserva Federal — actualizar cada año.
+_FOMC_DATES: list[date] = [
+    date(2026, 1, 28), date(2026, 3, 18), date(2026, 4, 29), date(2026, 6, 17),
+    date(2026, 7, 29), date(2026, 9, 16), date(2026, 10, 28), date(2026, 12, 9),
+]
+
+_DIAS_ES  = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
+_MESES_ES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
 
 
-def _get_market_status() -> dict:
+def _fmt_dia(d) -> str:
+    """date → 'vie 16 oct'."""
+    return f"{_DIAS_ES[d.weekday()]} {d.day} {_MESES_ES[d.month - 1]}"
+
+
+def _is_trading_date(d: date) -> bool:
+    return d.weekday() < 5 and d not in _NYSE_HOLIDAY_DATES
+
+
+def _session_times(d: date) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Apertura y cierre (hora NY) de la sesión del día d."""
+    base = pd.Timestamp(d).tz_localize(_NY_TZ)
+    close_h = 13 if d in _NYSE_EARLY_CLOSES else 16
+    return base + pd.Timedelta(hours=9, minutes=30), base + pd.Timedelta(hours=close_h)
+
+
+def _get_market_status(now_et: pd.Timestamp | None = None) -> dict:
     """
-    Devuelve estado actual del mercado NYSE.
-    Keys: status ('open'|'pre'|'post'|'holiday'|'weekend'|'closed'),
-          holiday_name (str|None), next_open (date|None), is_trading_day (bool)
+    Estado del mercado NYSE.
+    status: 'open' | 'pre' (4:00–9:30) | 'post' (cierre–20:00) | 'closed' (madrugada/noche)
+            | 'holiday' | 'weekend'
+    Además: hora de apertura/cierre, siguiente evento y última sesión con precios.
     """
-    try:
-        now_et = pd.Timestamp.now(tz="America/New_York")
-    except Exception:
-        now_et = pd.Timestamp.now()
+    if now_et is None:
+        now_et = pd.Timestamp.now(tz=_NY_TZ)
     today = now_et.date()
-    weekday = now_et.weekday()  # 0=Mon … 6=Sun
+    is_trading = _is_trading_date(today)
 
-    if weekday >= 5:
-        status = "weekend"
-        holiday_name = "Fin de semana"
-        is_trading = False
-    elif today in _NYSE_HOLIDAY_DATES:
-        status = "holiday"
-        holiday_name = _NYSE_HOLIDAYS[today]
-        is_trading = False
+    if today.weekday() >= 5:
+        status, holiday_name = "weekend", "Fin de semana"
+    elif not is_trading:
+        status, holiday_name = "holiday", _NYSE_HOLIDAYS[today]
     else:
-        is_trading = True
-        hour_et = now_et.hour + now_et.minute / 60
-        if hour_et < 9.5:
-            status = "pre"
-        elif hour_et < 16.0:
-            status = "open"
-        else:
-            status = "post"
         holiday_name = None
+        o, c = _session_times(today)
+        pre_start  = o.normalize() + pd.Timedelta(hours=4)
+        post_end   = o.normalize() + pd.Timedelta(hours=20)
+        if now_et < pre_start:   status = "closed"
+        elif now_et < o:         status = "pre"
+        elif now_et < c:         status = "open"
+        elif now_et < post_end:  status = "post"
+        else:                    status = "closed"
 
-    # Próximo día hábil
-    next_open = None
-    if not is_trading:
-        d = today + timedelta(days=1)
-        for _ in range(10):
-            if d.weekday() < 5 and d not in _NYSE_HOLIDAY_DATES:
-                next_open = d
-                break
-            d += timedelta(days=1)
+    # Próxima sesión que todavía no abre
+    d = today
+    for _ in range(15):
+        if _is_trading_date(d) and _session_times(d)[0] > now_et:
+            break
+        d += timedelta(days=1)
+    next_open_dt = _session_times(d)[0]
 
+    # Última sesión que ya abrió (de ahí vienen los precios "de hoy")
+    d = today
+    for _ in range(15):
+        if _is_trading_date(d) and _session_times(d)[0] <= now_et:
+            break
+        d -= timedelta(days=1)
+    last_session = d
+
+    open_dt, close_dt = _session_times(today) if is_trading else (None, None)
     return {
         "status": status,
         "holiday_name": holiday_name,
         "is_trading_day": is_trading,
-        "next_open": next_open,
+        "next_open": next_open_dt.date() if not is_trading else None,
+        "next_open_dt": next_open_dt,
+        "open_dt": open_dt,
+        "close_dt": close_dt,
+        "early_close": _NYSE_EARLY_CLOSES.get(today) if is_trading else None,
+        "last_session": last_session,
+        "now_et": now_et,
         "date": today,
     }
+
+
+def price_day_label(mkt: dict | None = None) -> str:
+    """Etiqueta honesta para el cambio diario: 'Hoy' solo si la sesión es la de hoy."""
+    mkt = mkt or _get_market_status()
+    if mkt["status"] == "open":
+        return "Hoy"
+    if mkt["last_session"] == mkt["date"]:
+        return "Hoy (cierre)"
+    return f"Últ. cierre ({_fmt_dia(mkt['last_session'])})"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -281,10 +414,15 @@ def _gist_find_existing() -> str:
 
 
 def _gist_get_files() -> dict:
-    """Devuelve el dict de archivos del Gist o {} si falla."""
+    """Devuelve el dict de archivos del Gist o {} si falla (caché 60 s)."""
     gid = _load_gist_id()
     if not gid:
         return {}
+    return _gist_get_files_cached(gid, str(hash(_load_github_token())))
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _gist_get_files_cached(gid: str, _token_key: str) -> dict:
     try:
         r = requests.get(
             f"https://api.github.com/gists/{gid}",
@@ -314,6 +452,8 @@ def _gist_patch(files_patch: dict) -> bool:
             json={"files": files_patch},
             timeout=15,
         )
+        if r.status_code == 200:
+            _gist_get_files_cached.clear()
         return r.status_code == 200
     except Exception:
         return False
@@ -419,6 +559,18 @@ def fetch_cetes_rate(token: str) -> tuple[float, str]:
     except Exception:
         pass
     return 0.09, "fallback"
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def fetch_tbill_rate() -> tuple[float, str]:
+    """T-Bill 13 semanas (^IRX, cotiza en %): tasa libre de riesgo en USD."""
+    try:
+        h = yf.Ticker("^IRX").history(period="1mo")["Close"].dropna()
+        if not h.empty and 0 < float(h.iloc[-1]) < 20:
+            return round(float(h.iloc[-1]) / 100, 6), str(h.index[-1].date())
+    except Exception:
+        pass
+    return 0.04, "fallback"
+
 
 # ─────────────────────────────────────────────────────────────
 # ESTILOS CSS  (Aesthetic: terminal financiero refinado)
@@ -528,13 +680,18 @@ html, body, [class*="css"] {
     font-family: var(--mono);
 }
 .pm-card-value {
-    font-size: 2rem;
+    /* Se adapta al ancho: en filas de 5-6 tarjetas el número no se parte en dos líneas */
+    font-size: clamp(1.05rem, 1.6vw, 2rem);
     font-weight: 700;
     color: var(--text);
-    letter-spacing: -1.5px;
+    letter-spacing: -1px;
     font-family: var(--mono);
-    line-height: 1;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
+.pm-card { padding: 18px 18px; min-width: 0; }
 .pm-card-sub {
     font-size: 0.76rem;
     color: var(--muted);
@@ -859,18 +1016,11 @@ def fetch_live_prices(tickers: list[str]) -> dict:
     if not clean:
         return prices
 
-    try:
-        _ny_now    = pd.Timestamp.now(tz="America/New_York")
-        today_date = _ny_now.date()
-        # Si el mercado ya cerró (o aún no abrió), el último bar disponible
-        # es el precio vigente — no tiene sentido buscar un precio de "hoy"
-        # con fast_info que devolvería el mismo cierre.
-        _market_open  = _ny_now.replace(hour=9,  minute=30, second=0, microsecond=0)
-        _market_close = _ny_now.replace(hour=16, minute=0,  second=0, microsecond=0)
-        _market_currently_open = _market_open <= _ny_now <= _market_close
-    except Exception:
-        today_date = pd.Timestamp.now().date()
-        _market_currently_open = True  # asumir abierto si no podemos calcular
+    # Si el mercado ya cerró (o aún no abrió), el último bar disponible es el
+    # precio vigente — fast_info devolvería el mismo cierre (→ 0.00%).
+    _mkt_now   = _get_market_status()
+    today_date = _mkt_now["date"]
+    _market_currently_open = _mkt_now["status"] == "open"
 
     close_df = pd.DataFrame()
     try:
@@ -894,7 +1044,7 @@ def fetch_live_prices(tickers: list[str]) -> dict:
     needs_full:        list[str] = []   # no tienen nada del batch
 
     # Si hoy es feriado o fin de semana, el último bar disponible ya ES el precio correcto
-    is_trading_day = _get_market_status()["is_trading_day"]
+    is_trading_day = _mkt_now["is_trading_day"]
 
     for t in clean:
         if close_df.empty or t not in close_df.columns:
@@ -1029,23 +1179,7 @@ def fetch_pulse_data(tickers: list[str]) -> dict:
     except Exception:
         intra_close = pd.DataFrame()
 
-    # ── 2. 2 días diarios → prev_close confiable ──────────────
-    # Los cierres diarios ajustados son la referencia más fiable
-    try:
-        daily_raw = yf.download(
-            tickers, period="5d", interval="1d",
-            auto_adjust=True, prepost=False,
-            progress=False, threads=True,
-        )
-        if isinstance(daily_raw.columns, pd.MultiIndex):
-            daily_close = daily_raw["Close"]
-        else:
-            daily_close = daily_raw[["Close"]].rename(
-                columns={"Close": tickers[0]}) if len(tickers) == 1 else daily_raw
-    except Exception:
-        daily_close = pd.DataFrame()
-
-    # ── 3. Histórico mensual → RSI / SMA20 / retorno 1S ───────
+    # ── 2. Histórico mensual → RSI / SMA20 / retorno 1S / prev_close de respaldo ──
     try:
         hist_1m = yf.download(
             tickers, period="1mo", interval="1d",
@@ -1063,6 +1197,7 @@ def fetch_pulse_data(tickers: list[str]) -> dict:
     except Exception:
         close_1m = pd.DataFrame()
         vol_1m   = pd.DataFrame()
+    daily_close = close_1m
 
     # ── 4. Precios live via batch (reutiliza fetch_live_prices) ──
     live_prices = fetch_live_prices(tuple(sorted(tickers)))
@@ -1169,6 +1304,26 @@ def fetch_range_data(tickers: tuple, period: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _dividend_info(info: dict) -> tuple[float, float]:
+    """
+    (rendimiento como fracción, dividendo anual por acción).
+    Se calcula dividendo/precio porque Yahoo cambió `dividendYield` de fracción
+    a porcentaje (0.47 ahora significa 0.47%, no 47%).
+    """
+    price = float(info.get("currentPrice") or info.get("regularMarketPrice")
+                  or info.get("previousClose") or 0)
+    rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
+    if rate and price > 0:
+        return float(rate) / price, float(rate)
+    etf_yield = info.get("yield")            # ETFs: ya viene como fracción
+    if etf_yield:
+        return float(etf_yield), float(etf_yield) * price
+    dy = info.get("dividendYield")
+    if dy:
+        return float(dy) / 100, float(dy) / 100 * price
+    return 0.0, 0.0
+
+
 @st.cache_data(ttl=7200, show_spinner=False)
 def fetch_events_data(tickers: tuple) -> dict:
     """
@@ -1203,8 +1358,8 @@ def fetch_events_data(tickers: tuple) -> dict:
             # ── Dividend info ──────────────────────────────────────
             try:
                 info = tk.info or {}
-                entry["div_yield"]  = float(info.get("dividendYield") or 0)
-                entry["annual_div"] = float(info.get("dividendRate")  or 0)
+                entry["div_yield"], entry["annual_div"] = _dividend_info(info)
+                entry["beta"] = info.get("beta")
                 ex_ts = info.get("exDividendDate")
                 if ex_ts:
                     entry["next_ex_date"] = datetime.fromtimestamp(int(ex_ts))
@@ -1228,7 +1383,9 @@ def fetch_history(tickers: list[str], start: str, end: str) -> pd.DataFrame:
     if not tickers:
         return pd.DataFrame()
     try:
-        raw = yf.download(tickers, start=start, end=end,
+        # yfinance trata `end` como exclusivo: sumar 1 día para incluir la fecha final
+        end_incl = (pd.Timestamp(end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        raw = yf.download(tickers, start=start, end=end_incl,
                           auto_adjust=True, progress=False, threads=True)
         if raw.empty:
             return pd.DataFrame()
@@ -1244,6 +1401,7 @@ def fetch_history(tickers: list[str], start: str, end: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_usd_mxn() -> float:
     try:
         p = yf.Ticker("USDMXN=X").fast_info.last_price
@@ -1309,7 +1467,7 @@ def load_portfolio(name: str) -> dict | None:
                 "Type":   "BUY",
                 "Shares": h.get("Shares", 0),
                 "Price":  h.get("AvgCost", 0),
-                "Date":   h.get("Date", str(date.today())),
+                "Date":   h.get("Date", str(_today_mx())),
                 "Notes":  "Importado",
             })
         data["transactions"] = migrated
@@ -1332,6 +1490,95 @@ def delete_portfolio(name: str) -> None:
         os.remove(path)
     # Eliminar también del Gist
     _gist_delete_portfolio(name)
+    if _get_last_portfolio(local_only=True) == name:
+        _write_credential(_LAST_PF_FILE, "")
+
+
+# ── Guardado / carga automáticos ─────────────────────────────
+_LAST_PF_FILE   = os.path.join(PORTFOLIO_DIR, ".last_portfolio")
+_GIST_LAST_FILE = "last_portfolio.txt"
+_PERSISTED_KEYS = ("transactions", "target_weights", "benchmark", "thesis", "alerts",
+                   "extra_benchmarks", "perf_custom_start", "perf_use_custom", "watchlist")
+
+
+def _persisted_state() -> dict:
+    return {k: st.session_state.get(k) for k in _PERSISTED_KEYS}
+
+
+def _remember_last_portfolio(name: str) -> None:
+    if not name or _get_last_portfolio(local_only=True) == name:
+        return
+    _write_credential(_LAST_PF_FILE, name)
+    _gist_patch({_GIST_LAST_FILE: {"content": name}})
+
+
+def _get_last_portfolio(local_only: bool = False) -> str:
+    name = _read_credential(_LAST_PF_FILE)
+    if name or local_only:
+        return name
+    f = _gist_get_files().get(_GIST_LAST_FILE) or {}
+    return (f.get("content") or "").strip()
+
+
+def apply_portfolio_data(data: dict, name: str) -> None:
+    """Carga un portafolio guardado en la sesión (botón Cargar y auto-carga)."""
+    st.session_state["portfolio_name"]   = data.get("name", name)
+    st.session_state["pname_in"]         = data.get("name", name)
+    st.session_state["benchmark"]        = data.get("benchmark", "SPY")
+    st.session_state["transactions"]     = data.get("transactions", [])
+    st.session_state["target_weights"]   = data.get("target_weights", {})
+    st.session_state["thesis"]           = data.get("thesis", {})
+    st.session_state["alerts"]           = data.get("alerts", [])
+    st.session_state["extra_benchmarks"] = data.get("extra_benchmarks", [])
+    st.session_state["perf_custom_start"]= data.get("perf_custom_start")
+    st.session_state["perf_use_custom"]  = data.get("perf_use_custom", False)
+    st.session_state["watchlist"]        = data.get("watchlist", [])
+    # Recién cargado = ya guardado: no re-escribir hasta que cambie algo
+    st.session_state["_last_saved_fp"]   = _txns_fingerprint(_persisted_state())
+    _remember_last_portfolio(st.session_state["portfolio_name"])
+
+
+def autoload_last_portfolio() -> None:
+    """Una vez por sesión: abre el último portafolio usado (URL → archivo → Gist → único)."""
+    if st.session_state.get("_autoload_done"):
+        return
+    st.session_state["_autoload_done"] = True
+    if st.session_state.get("transactions"):
+        return
+    saved = list_portfolios()
+    candidates = []
+    try:
+        candidates.append(st.query_params.get("pf", ""))
+    except Exception:
+        pass
+    candidates.append(_get_last_portfolio())
+    if len(saved) == 1:
+        candidates.append(saved[0])
+    for name in candidates:
+        if name and name in saved:
+            data = load_portfolio(name)
+            if data:
+                apply_portfolio_data(data, name)
+                return
+
+
+def autosave_portfolio() -> None:
+    """Guarda automáticamente si algo del portafolio cambió desde el último guardado."""
+    name = st.session_state.get("portfolio_name", "")
+    if not name:
+        return
+    fp = _txns_fingerprint(_persisted_state())
+    if fp == st.session_state.get("_last_saved_fp"):
+        return
+    try:
+        save_portfolio(name, st.session_state.get("transactions", []),
+                       st.session_state.get("target_weights", {}),
+                       st.session_state.get("benchmark", "SPY"))
+        st.session_state["_last_saved_fp"] = fp
+        st.session_state["_last_saved_at"] = _now_mx().strftime("%H:%M:%S")
+        _remember_last_portfolio(name)
+    except Exception as e:
+        st.session_state["_autosave_error"] = str(e)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1458,6 +1705,27 @@ def calculate_rebalance(
             "Acción":        action,
             "Razón":         reason,
         })
+
+    # Modo pasivo: no hay ventas que financien, así que las compras no pueden
+    # superar el capital nuevo → repartirlo proporcional a lo que falta en cada activo.
+    if mode == "passive":
+        buy_need = sum(t["Delta USD"] for t in trades if t["Acción"] == "BUY")
+        if buy_need > new_capital + 0.01:
+            scale = new_capital / buy_need if buy_need > 0 else 0.0
+            for t in trades:
+                if t["Acción"] != "BUY":
+                    continue
+                full = t["Delta USD"]
+                t["Delta USD"] = full * scale
+                t["Acciones"]  = t["Delta USD"] / t["Precio"] if t["Precio"] > 0 else 0.0
+                if t["Delta USD"] < min_trade_usd:
+                    t["Acción"] = "HOLD"
+                    t["Razón"]  = (f"Sin capital suficiente · requería ${full:,.0f}"
+                                   if new_capital > 0 else "Modo pasivo sin capital nuevo")
+                    t["Delta USD"] = 0.0
+                    t["Acciones"]  = 0.0
+                else:
+                    t["Razón"] += f" · {scale:.0%} de lo necesario (capital limitado)"
 
     # Ordenar: ventas → compras → holds (dentro de cada grupo, mayor monto primero)
     _order = {"SELL": 0, "BUY": 1, "HOLD": 2}
@@ -1595,154 +1863,109 @@ def build_portfolio_equity(holdings: pd.DataFrame, prices_df: pd.DataFrame) -> p
     return equity.dropna()
 
 
+def _replay_portfolio(txns: pd.DataFrame, prices_df: pd.DataFrame) -> tuple[pd.Series, dict]:
+    """
+    Recorre los días hábiles de `prices_df` aplicando las transacciones en orden.
+    Devuelve (NAV diario, flujos de capital por día hábil).
+
+    · Una transacción con fecha no hábil (fin de semana/feriado) se aplica — y su
+      flujo se registra — el siguiente día hábil, así el TWR no ve un salto falso.
+    · ADJUSTMENT fija los títulos; su flujo se valora al cierre del día para que
+      la corrección no aparezca como ganancia/pérdida.
+    · DIVIDEND sale del NAV invertido como efectivo → flujo negativo (cuenta como retorno).
+    """
+    if txns.empty or prices_df.empty:
+        return pd.Series(dtype=float), {}
+
+    txns = _sort_txns(txns)
+    positions: dict[str, float] = {}
+    nav_dict: dict = {}
+    cf: dict = {}
+    ptr, n = 0, len(txns)
+    cols = set(prices_df.columns)
+
+    for day in prices_df.index:
+        flow = 0.0
+        touched = False
+        while ptr < n and txns.at[ptr, "Date"] <= day:
+            t  = str(txns.at[ptr, "Ticker"])
+            sh = float(txns.at[ptr, "Shares"])
+            px = float(txns.at[ptr, "Price"])
+            tp = str(txns.at[ptr, "Type"]).upper()
+            if tp == "BUY":
+                positions[t] = positions.get(t, 0.0) + sh
+                flow += sh * px
+                touched = True
+            elif tp == "SELL":
+                sold = min(sh, positions.get(t, 0.0))
+                positions[t] = positions.get(t, 0.0) - sold
+                flow -= sold * px
+                touched = True
+            elif tp == "ADJUSTMENT":
+                old = positions.get(t, 0.0)
+                mkt = prices_df.at[day, t] if t in cols else float("nan")
+                mkt = float(mkt) if pd.notna(mkt) and mkt > 0 else px
+                positions[t] = sh
+                flow += (sh - old) * mkt
+                touched = True
+            elif tp == "DIVIDEND":
+                flow -= _txn_amount(sh, px)
+            ptr += 1
+
+        if flow:
+            cf[day] = cf.get(day, 0.0) + flow
+
+        if not positions:
+            continue
+        nav = 0.0
+        for t, s in positions.items():
+            if s < 1e-9 or t not in cols:
+                continue
+            p = prices_df.at[day, t]
+            if pd.notna(p) and p > 0:
+                nav += s * p
+        # Registrar también NAV=0 tras liquidar todo, para no perder el flujo de esa venta
+        if nav > 0 or touched or day in cf:
+            nav_dict[day] = nav
+
+    return pd.Series(nav_dict, dtype=float), cf
+
+
 def build_portfolio_equity_from_transactions(
     txns: pd.DataFrame,
     prices_df: pd.DataFrame,
 ) -> pd.Series:
     """
-    Curva de valor REAL del portafolio reconstruida desde el historial
-    de transacciones.
-
-    Por cada día de trading se calcula exactamente qué acciones se tenían
-    en ese momento (acumulando BUYs y SELLs en orden cronológico) y se
-    multiplica por el precio histórico de ese día.
-
-    Esto corrige el bug de usar las posiciones actuales para todo el historial:
-    si compraste NVDA ayer, NO aparece en el historial de hace 6 meses.
+    Curva de valor REAL del portafolio reconstruida desde el historial de
+    transacciones: en cada día se usan los títulos que realmente se tenían.
     """
-    if txns.empty or prices_df.empty:
-        return pd.Series(dtype=float)
-
-    txns = txns.copy()
-    txns["Date"] = pd.to_datetime(txns["Date"])
-    txns = txns.sort_values("Date").reset_index(drop=True)
-
-    trading_days = prices_df.index          # DatetimeIndex
-    positions: dict[str, float] = {}        # {ticker: shares_held}
-    nav_dict: dict = {}
-    txn_ptr = 0
-    n_txns  = len(txns)
-
-    for day in trading_days:
-        # Aplicar todas las transacciones cuya fecha ≤ este día de trading
-        while txn_ptr < n_txns and txns.at[txn_ptr, "Date"] <= day:
-            t  = str(txns.at[txn_ptr, "Ticker"])
-            sh = float(txns.at[txn_ptr, "Shares"])
-            tp = str(txns.at[txn_ptr, "Type"]).upper()
-            positions.setdefault(t, 0.0)
-            if tp == "BUY":
-                positions[t] += sh
-            elif tp == "SELL":
-                positions[t] = max(0.0, positions[t] - sh)
-            txn_ptr += 1
-
-        if not positions:
-            continue   # aún no hay ninguna compra
-
-        # NAV = Σ acciones_i × precio_i (solo tickers con precio disponible ese día)
-        nav = 0.0
-        for t, sh in positions.items():
-            if sh < 1e-9 or t not in prices_df.columns:
-                continue
-            p = prices_df.at[day, t] if day in prices_df.index else float("nan")
-            if pd.notna(p) and p > 0:
-                nav += sh * p
-
-        if nav > 0:
-            nav_dict[day] = nav
-
-    return pd.Series(nav_dict)
+    nav, _ = _replay_portfolio(txns, prices_df)
+    return nav[nav > 0]
 
 
 def build_twr_series(txns: pd.DataFrame, prices_df: pd.DataFrame) -> pd.Series:
     """
     Time-Weighted Return (TWR) — retorno puro sin efecto de aportaciones.
+    Los flujos ocurren al cierre del día (la posición nueva se valora al cierre):
 
-    Cada vez que el usuario deposita capital nuevo (BUY sin SELL compensador),
-    ese monto se descuenta del "retorno" del día usando Modified Dietz:
-
-        CF(d)  = Σ compras_d  − Σ ventas_d     (neto de capital externo ese día)
-        r(d)   = (NAV(d) − NAV(d−1) − CF(d)) / (NAV(d−1) + CF(d))
+        r(d)   = (NAV(d) − CF(d)) / NAV(d−1) − 1
         TWR(d) = TWR(d−1) × (1 + r(d))
 
-    Resultado: serie normalizada a base 100 que sube/baja solo por
-    movimientos de precios, ignorando depósitos periódicos.
+    Serie base 100 que sube/baja solo por movimientos de precio.
     """
-    if txns.empty or prices_df.empty:
+    nav_series, daily_cf = _replay_portfolio(txns, prices_df)
+    if len(nav_series) < 2:
         return pd.Series(dtype=float)
 
-    txns = txns.copy()
-    txns["Date"] = pd.to_datetime(txns["Date"])
-    txns = txns.sort_values("Date").reset_index(drop=True)
-
-    # ── Flujos de capital netos por día ──────────────────────────
-    # CF > 0 → capital entrando  |  CF < 0 → capital saliendo
-    daily_cf: dict = {}
-    for _, row in txns.iterrows():
-        d      = pd.Timestamp(row["Date"]).normalize()
-        amount = float(row["Shares"]) * float(row["Price"])
-        tp     = str(row["Type"]).upper()
-        if tp == "BUY":
-            daily_cf[d] = daily_cf.get(d, 0.0) + amount
-        elif tp == "SELL":
-            daily_cf[d] = daily_cf.get(d, 0.0) - amount
-
-    # ── Reconstruir NAV diario desde transacciones ───────────────
-    trading_days = prices_df.index
-    positions: dict[str, float] = {}
-    nav_dict: dict = {}
-    txn_ptr = 0
-    n_txns  = len(txns)
-
-    for day in trading_days:
-        while txn_ptr < n_txns and txns.at[txn_ptr, "Date"] <= day:
-            t  = str(txns.at[txn_ptr, "Ticker"])
-            sh = float(txns.at[txn_ptr, "Shares"])
-            tp = str(txns.at[txn_ptr, "Type"]).upper()
-            positions.setdefault(t, 0.0)
-            if tp == "BUY":
-                positions[t] += sh
-            elif tp == "SELL":
-                positions[t] = max(0.0, positions[t] - sh)
-            txn_ptr += 1
-
-        if not positions:
-            continue
-
-        nav = 0.0
-        for t, sh in positions.items():
-            if sh < 1e-9 or t not in prices_df.columns:
-                continue
-            p = prices_df.at[day, t] if day in prices_df.index else float("nan")
-            if pd.notna(p) and p > 0:
-                nav += sh * p
-        if nav > 0:
-            nav_dict[day] = nav
-
-    if len(nav_dict) < 2:
-        return pd.Series(dtype=float)
-
-    nav_series = pd.Series(nav_dict)
-
-    # ── Calcular TWR acumulado ────────────────────────────────────
     twr_values = [100.0]
     dates      = [nav_series.index[0]]
-
     for i in range(1, len(nav_series)):
         day      = nav_series.index[i]
         prev_nav = nav_series.iloc[i - 1]
         curr_nav = nav_series.iloc[i]
         cf       = daily_cf.get(day, 0.0)
-
-        denom = prev_nav + cf
-        if denom > 1.0:
-            r = (curr_nav - prev_nav - cf) / denom
-        else:
-            r = 0.0
-
-        # Acotar retornos diarios extremos para evitar errores de datos
-        r = max(-0.50, min(0.50, r))
-
+        r = (curr_nav - cf) / prev_nav - 1.0 if prev_nav > 1.0 else 0.0
+        r = max(-0.50, min(0.50, r))   # acotar errores de datos
         twr_values.append(twr_values[-1] * (1.0 + r))
         dates.append(day)
 
@@ -1787,6 +2010,28 @@ def init_state() -> None:
             st.session_state["banxico_token"] = loaded
 
 
+TXN_TYPES = ["BUY", "SELL", "ADJUSTMENT", "DIVIDEND", "DEPOSIT", "WITHDRAW"]
+TXN_LABELS = {
+    "BUY": "Compra", "SELL": "Venta", "ADJUSTMENT": "Ajuste broker",
+    "DIVIDEND": "Dividendo", "DEPOSIT": "Depósito", "WITHDRAW": "Retiro",
+}
+_CASH_TYPES = ("DIVIDEND", "DEPOSIT", "WITHDRAW")
+CASH_TICKER = "CASH"
+
+
+def _txn_amount(shares: float, price: float) -> float:
+    """Monto de una transacción de efectivo: se guarda en Price con Shares=0."""
+    return price if shares == 0 else shares * price
+
+
+def _sort_txns(txns: pd.DataFrame) -> pd.DataFrame:
+    """Orden cronológico estable: dentro del mismo día respeta el orden de captura."""
+    df = txns.copy()
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce").fillna(pd.Timestamp(_today_mx()))
+    df["_ord"] = range(len(df))
+    return df.sort_values(["Date", "_ord"], kind="stable").drop(columns="_ord").reset_index(drop=True)
+
+
 def transactions_df() -> pd.DataFrame:
     """Retorna el log completo de transacciones como DataFrame."""
     txns = st.session_state.get("transactions", [])
@@ -1803,6 +2048,7 @@ def transactions_df() -> pd.DataFrame:
     df["Price"]  = pd.to_numeric(df["Price"],  errors="coerce").fillna(0)
     df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
     df["Type"]   = df["Type"].astype(str).str.upper()
+    df["Notes"]  = df["Notes"].fillna("").astype(str)
     return df[df["Ticker"] != ""].reset_index(drop=True)
 
 
@@ -1816,11 +2062,13 @@ def compute_positions(txns: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=["Ticker","Shares","AvgCost"])
 
     positions: dict[str, dict] = {}
-    for _, row in txns.sort_values("Date").iterrows():
+    for _, row in _sort_txns(txns).iterrows():
         t      = str(row["Ticker"])
         shares = float(row["Shares"])
         price  = float(row["Price"])
         ttype  = str(row["Type"]).upper()
+        if ttype not in ("BUY", "SELL", "ADJUSTMENT"):
+            continue
 
         if t not in positions:
             positions[t] = {"shares": 0.0, "avg_cost": 0.0}
@@ -1838,10 +2086,9 @@ def compute_positions(txns: pd.DataFrame) -> pd.DataFrame:
             # El costo promedio NO cambia en ventas (método promedio ponderado)
 
         elif ttype == "ADJUSTMENT":
-            # Sincronización con broker: sobreescribe completamente shares y costo promedio.
-            # Preserva historial anterior pero establece la verdad del broker como estado actual.
+            # Sincronización con broker: Shares = títulos reales, Price = costo promedio real
             positions[t]["shares"]   = shares
-            positions[t]["avg_cost"] = price  # campo Price = costo promedio del broker
+            positions[t]["avg_cost"] = price
 
     rows = [
         {"Ticker": t, "Shares": round(p["shares"], 8), "AvgCost": p["avg_cost"]}
@@ -1855,68 +2102,49 @@ def compute_positions(txns: pd.DataFrame) -> pd.DataFrame:
 
 def compute_realized_pnl(txns: pd.DataFrame) -> dict:
     """
-    Calcula P&L realizado completo a partir del historial de transacciones.
-    Método: Costo Promedio Ponderado.
-
-    En cada SELL registra:
-        P&L realizado = (precio_venta - avg_cost_en_ese_momento) × acciones_vendidas
-
-    Returns:
-        {
-          'by_ticker': {ticker: {
-              'realized_pnl':  float,   # ganancia/pérdida de acciones ya vendidas
-              'shares_sold':   float,   # total acciones vendidas en toda la historia
-              'proceeds':      float,   # ingresos brutos de todas las ventas
-              'cost_sold':     float,   # costo base de lo vendido
-              'shares_open':   float,   # acciones aún abiertas
-              'avg_cost_open': float,   # costo promedio posición abierta actual
-              'is_closed':     bool,    # True si la posición está totalmente cerrada
-          }},
-          'total_realized': float,      # suma de P&L realizado de todos los tickers
-        }
+    P&L realizado (costo promedio ponderado) + dividendos cobrados.
+    En cada SELL: P&L = (precio_venta - avg_cost_en_ese_momento) × acciones_vendidas
     """
     if txns.empty:
-        return {"by_ticker": {}, "total_realized": 0.0}
+        return {"by_ticker": {}, "total_realized": 0.0, "total_dividends": 0.0}
 
-    state: dict[str, dict] = {}   # {ticker: {shares, avg_cost, realized_pnl, ...}}
+    state: dict[str, dict] = {}
 
-    for _, row in txns.sort_values("Date").iterrows():
+    for _, row in _sort_txns(txns).iterrows():
         t      = str(row["Ticker"])
         shares = float(row["Shares"])
         price  = float(row["Price"])
         ttype  = str(row["Type"]).upper()
+        if ttype in ("DEPOSIT", "WITHDRAW"):
+            continue
 
         if t not in state:
-            state[t] = {
-                "shares":       0.0,
-                "avg_cost":     0.0,
-                "realized_pnl": 0.0,
-                "shares_sold":  0.0,
-                "proceeds":     0.0,
-                "cost_sold":    0.0,
-            }
-
+            state[t] = {"shares": 0.0, "avg_cost": 0.0, "realized_pnl": 0.0,
+                        "shares_sold": 0.0, "proceeds": 0.0, "cost_sold": 0.0,
+                        "dividends": 0.0}
         s = state[t]
 
         if ttype == "BUY":
-            old_sh = s["shares"]
-            new_sh = old_sh + shares
+            new_sh = s["shares"] + shares
             if new_sh > 0:
-                s["avg_cost"] = (s["avg_cost"] * old_sh + price * shares) / new_sh
+                s["avg_cost"] = (s["avg_cost"] * s["shares"] + price * shares) / new_sh
             s["shares"] = new_sh
-
         elif ttype == "SELL":
             sold = min(shares, s["shares"])   # no vender más de lo que hay
             if sold > 0 and s["avg_cost"] > 0:
-                pnl_this = (price - s["avg_cost"]) * sold
-                s["realized_pnl"] += pnl_this
+                s["realized_pnl"] += (price - s["avg_cost"]) * sold
                 s["proceeds"]     += price * sold
                 s["cost_sold"]    += s["avg_cost"] * sold
                 s["shares_sold"]  += sold
             s["shares"] = max(0.0, s["shares"] - sold)
+        elif ttype == "ADJUSTMENT":
+            s["shares"]   = shares
+            s["avg_cost"] = price
+        elif ttype == "DIVIDEND":
+            s["dividends"] += _txn_amount(shares, price)
 
     by_ticker = {}
-    total_realized = 0.0
+    total_realized = total_div = 0.0
     for t, s in state.items():
         by_ticker[t] = {
             "realized_pnl":  round(s["realized_pnl"], 4),
@@ -1925,11 +2153,108 @@ def compute_realized_pnl(txns: pd.DataFrame) -> dict:
             "cost_sold":     round(s["cost_sold"],    4),
             "shares_open":   round(s["shares"],       8),
             "avg_cost_open": round(s["avg_cost"],     4),
+            "dividends":     round(s["dividends"],    4),
             "is_closed":     s["shares"] < 1e-8,
         }
         total_realized += s["realized_pnl"]
+        total_div      += s["dividends"]
 
-    return {"by_ticker": by_ticker, "total_realized": round(total_realized, 4)}
+    return {"by_ticker": by_ticker, "total_realized": round(total_realized, 4),
+            "total_dividends": round(total_div, 4)}
+
+
+def compute_cash_balance(txns: pd.DataFrame) -> float | None:
+    """
+    Efectivo disponible en el broker. Solo tiene sentido si el usuario registra
+    depósitos; si no hay ningún DEPOSIT devuelve None.
+    """
+    if txns.empty or not (txns["Type"] == "DEPOSIT").any():
+        return None
+    cash = 0.0
+    for _, r in txns.iterrows():
+        tp, amt = r["Type"], float(r["Shares"]) * float(r["Price"])
+        if tp == "DEPOSIT":    cash += _txn_amount(float(r["Shares"]), float(r["Price"]))
+        elif tp == "WITHDRAW": cash -= _txn_amount(float(r["Shares"]), float(r["Price"]))
+        elif tp == "DIVIDEND": cash += _txn_amount(float(r["Shares"]), float(r["Price"]))
+        elif tp == "BUY":      cash -= amt
+        elif tp == "SELL":     cash += amt
+    return cash
+
+
+def compute_money_summary(txns: pd.DataFrame, current_nav: float) -> dict:
+    """Aportado, retirado, dividendos y ganancia total del portafolio (en USD)."""
+    buys = sells = divs = 0.0
+    held: dict[str, float] = {}
+    for _, r in (_sort_txns(txns).iterrows() if not txns.empty else []):
+        t, sh, px, tp = r["Ticker"], float(r["Shares"]), float(r["Price"]), r["Type"]
+        if tp == "BUY":
+            buys += sh * px; held[t] = held.get(t, 0) + sh
+        elif tp == "SELL":
+            sells += sh * px; held[t] = max(0.0, held.get(t, 0) - sh)
+        elif tp == "DIVIDEND":
+            divs += _txn_amount(sh, px)
+        elif tp == "ADJUSTMENT":
+            delta = (sh - held.get(t, 0)) * px      # corrección valorada al costo informado
+            if delta >= 0: buys += delta
+            else:          sells -= delta
+            held[t] = sh
+    return {"buys": buys, "sells": sells, "dividends": divs,
+            "net_contrib": buys - sells,
+            "gain": current_nav + sells + divs - buys,
+            "xirr": compute_xirr(txns, current_nav)}
+
+
+def compute_xirr(txns: pd.DataFrame, current_nav: float,
+                 as_of: date | None = None) -> float | None:
+    """
+    Rendimiento ponderado por dinero (XIRR anual): toma en cuenta CUÁNDO y
+    CUÁNTO aportaste. Compras = salida de dinero, ventas/dividendos = entrada,
+    valor actual del portafolio = entrada final.
+    """
+    if txns.empty or current_nav <= 0:
+        return None
+    from scipy.optimize import brentq
+    as_of = as_of or _today_mx()
+    flows: list[tuple[date, float]] = []
+    held: dict[str, float] = {}
+    for _, r in _sort_txns(txns).iterrows():
+        d, t, sh, px, tp = r["Date"].date(), r["Ticker"], float(r["Shares"]), float(r["Price"]), r["Type"]
+        if tp == "BUY":
+            flows.append((d, -sh * px)); held[t] = held.get(t, 0) + sh
+        elif tp == "SELL":
+            flows.append((d, sh * px));  held[t] = max(0.0, held.get(t, 0) - sh)
+        elif tp == "DIVIDEND":
+            flows.append((d, _txn_amount(sh, px)))
+        elif tp == "ADJUSTMENT":
+            # Corrección: los títulos agregados/quitados se valoran al costo informado
+            flows.append((d, -(sh - held.get(t, 0)) * px)); held[t] = sh
+    flows.append((as_of, current_nav))
+    if not any(f < 0 for _, f in flows):
+        return None
+    d0 = min(d for d, _ in flows)
+    yrs = [(d - d0).days / 365.25 for d, _ in flows]
+    if max(yrs) < 1 / 365.25:
+        return None
+
+    def npv(rate):
+        return sum(f / (1 + rate) ** y for (_, f), y in zip(flows, yrs))
+    try:
+        return float(brentq(npv, -0.99, 100.0, maxiter=200))
+    except Exception:
+        return None
+
+
+def _push_undo(what: str) -> None:
+    """Guarda una copia del log antes de un cambio masivo para poder deshacerlo."""
+    st.session_state["_txns_undo"] = {
+        "what": what,
+        "txns": [dict(t) for t in st.session_state.get("transactions", [])],
+    }
+
+
+def _txns_fingerprint(obj) -> str:
+    import hashlib
+    return hashlib.md5(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def holdings_df() -> pd.DataFrame:
@@ -1939,10 +2264,8 @@ def holdings_df() -> pd.DataFrame:
     Evita recalcular en cada re-render de Streamlit.
     """
     txns = st.session_state.get("transactions", [])
-    # Build a lightweight cache key from transaction count + last entry
-    n = len(txns)
-    last = str(txns[-1]) if n > 0 else ""
-    cache_key = f"_hdf_cache_{n}_{hash(last)}"
+    # La clave cubre TODAS las transacciones: editar una intermedia también recalcula
+    cache_key = "_hdf_cache_" + _txns_fingerprint(txns)
 
     if cache_key not in st.session_state:
         # Invalidate any old cache entry
@@ -1995,7 +2318,7 @@ PLOTLY_LAYOUT = dict(
 )
 
 PLOTLY_CONFIG = {
-    "displayModeBar": True,
+    "displayModeBar": "hover",   # siempre visible tapaba los títulos de las gráficas
     "displaylogo": False,
     "modeBarButtonsToRemove": ["lasso2d", "select2d"],
 }
@@ -2164,58 +2487,6 @@ def tab_dashboard() -> None:
     triggered = check_alerts(hdf, prices, pulse_shared)
     render_alerts_banner(triggered)
 
-    # ── Banner de mercado cerrado (feriado / fin de semana) ────
-    _mkt = _get_market_status()
-    if not _mkt["is_trading_day"]:
-        _day_names_es = {0:"Lunes",1:"Martes",2:"Miércoles",3:"Jueves",
-                         4:"Viernes",5:"Sábado",6:"Domingo"}
-        _month_names_es = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
-                           7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
-        def _fmt_date_es(d):
-            return f"{_day_names_es[d.weekday()]} {d.day} {_month_names_es[d.month]}"
-
-        _reason = _mkt["holiday_name"]
-        _next   = _mkt["next_open"]
-        _next_str = f" · Reabre {_fmt_date_es(_next)}" if _next else ""
-        st.markdown(
-            f'<div style="background:rgba(255,179,0,0.08);border:1px solid rgba(255,179,0,0.3);'
-            f'border-radius:12px;padding:10px 16px;margin-bottom:12px;'
-            f'display:flex;align-items:center;gap:10px;">'
-            f'<span style="font-size:1.2rem;">🏛️</span>'
-            f'<div>'
-            f'<span style="color:#ffb300;font-weight:700;font-family:DM Mono,monospace;'
-            f'font-size:0.82rem;">BOLSA CERRADA — {_reason.upper()}</span>'
-            f'<span style="color:#8e8e93;font-size:0.75rem;font-family:DM Mono,monospace;'
-            f'margin-left:10px;">Precios al cierre del último día hábil{_next_str}</span>'
-            f'</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-        # Próximos feriados NYSE (90 días)
-        with st.expander("📅 Próximos feriados NYSE", expanded=False):
-            _today = _mkt["date"]
-            _upcoming = sorted(
-                [(d, n) for d, n in _NYSE_HOLIDAYS.items() if d >= _today],
-                key=lambda x: x[0]
-            )[:8]
-            if _upcoming:
-                _rows_html = "".join(
-                    f'<tr>'
-                    f'<td style="padding:5px 12px 5px 0;color:#aeaeb2;font-family:DM Mono,monospace;'
-                    f'font-size:0.78rem;white-space:nowrap;">{_fmt_date_es(d)}, {d.year}</td>'
-                    f'<td style="padding:5px 0;color:#ffffff;font-family:DM Mono,monospace;'
-                    f'font-size:0.78rem;">{"🔴 HOY — " if d == _today else ""}{n}</td>'
-                    f'</tr>'
-                    for d, n in _upcoming
-                )
-                st.markdown(
-                    f'<table style="border-collapse:collapse;">{_rows_html}</table>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.caption("No hay feriados registrados en los próximos 90 días.")
-
     # ── Calcular posiciones ────────────────────────────────────
     rows = []
     nav = cost_total = 0.0
@@ -2261,25 +2532,32 @@ def tab_dashboard() -> None:
     daily_usd    = df_live["Var. Día $"].sum()
     daily_pct    = daily_usd / (nav - daily_usd) if (nav - daily_usd) > 0 else 0.0
     unrealized_pnl = nav - cost_total
-    total_pnl      = unrealized_pnl + total_realized_pnl
+    total_pnl      = unrealized_pnl + total_realized_pnl + _pnl_data.get("total_dividends", 0.0)
     total_ret    = total_pnl / cost_total if cost_total > 0 else 0.0
     alpha_today  = daily_pct - bench_today
 
     # ── Métricas de riesgo (cached) ─────────────────────────
     @st.cache_data(ttl=900, show_spinner=False)
-    def _risk(tickers_t, weights_t, bench_t):
-        end = datetime.today(); start = end - timedelta(days=365)
+    def _risk(tickers_t, weights_t, bench_t, rf_t):
+        """Riesgo del portafolio ACTUAL si se hubiera tenido el último año."""
+        end = _today_dt(); start = end - timedelta(days=365)
         h = fetch_history(list(tickers_t) + [bench_t],
                           start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
         if h.empty: return {}
         tl = [t for t in tickers_t if t in h.columns]
         if not tl: return {}
         wd = dict(zip(tickers_t, weights_t))
-        w  = np.array([wd.get(t,0) for t in tl]); w /= max(w.sum(),1e-9)
-        pr = h[tl].pct_change().dropna(how="all").fillna(0).values @ w
+        rets = h[tl].pct_change().iloc[1:]
+        # Activos sin historia ese día (IPO reciente) no cuentan: se re-reparte su peso
+        wmat = pd.DataFrame(np.tile([wd.get(t, 0) for t in tl], (len(rets), 1)),
+                            index=rets.index, columns=tl).where(rets.notna(), 0.0)
+        wsum = wmat.sum(axis=1)
+        pr_s = ((rets.fillna(0) * wmat).sum(axis=1) / wsum.replace(0, np.nan)).dropna()
+        if len(pr_s) < 5: return {}
+        pr = pr_s.values
         ar = float((1+pr).prod()**(252/max(len(pr),1)) - 1)
         av = float(pr.std() * np.sqrt(252))
-        sh = (ar - 0.045) / av if av > 0 else 0
+        sh = (ar - rf_t) / av if av > 0 else 0
         v95  = float(np.percentile(pr, 5))
         cv95 = float(pr[pr<=v95].mean()) if len(pr[pr<=v95]) > 0 else v95
         cum  = (1+pr).cumprod()
@@ -2287,16 +2565,15 @@ def tab_dashboard() -> None:
         mdd  = float(dd.min())
         beta = None
         if bench_t in h.columns:
-            br = h[bench_t].pct_change().dropna()
-            idx = h[tl].pct_change().dropna().index
-            br2 = br.reindex(idx).dropna()
-            if len(br2) > 30:
-                cv = np.cov(pr[:len(br2)], br2.values)
-                bv = np.var(br2.values, ddof=1)
-                beta = round(cv[0,1]/bv, 2) if bv > 0 else None
+            both = pd.concat([pr_s.rename("p"), h[bench_t].pct_change().rename("b")],
+                             axis=1, join="inner").dropna()
+            if len(both) > 30:
+                bv = both["b"].var()
+                beta = round(float(both["p"].cov(both["b"]) / bv), 2) if bv > 0 else None
         return {"ar":ar,"av":av,"sh":sh,"v95":v95,"cv95":cv95,"mdd":mdd,"beta":beta}
 
-    risk = _risk(tuple(df_live["Emisora"]), tuple(df_live["Peso"]), bench)
+    risk = _risk(tuple(df_live["Emisora"]), tuple(df_live["Peso"]), bench,
+                 float(st.session_state.get("rf_rate", 0.04)))
 
     # ── Colores ───────────────────────────────────────────────
     gc = lambda v, rev=False: ("#30d158" if (v>=0)^rev else "#ff453a")
@@ -2396,6 +2673,9 @@ def tab_dashboard() -> None:
     ])
 
     _dc = gc(daily_usd); _tc = gc(total_pnl); _ac = gc(alpha_today)
+    _cash = compute_cash_balance(transactions_df())
+    _cash_html = (f"&ensp;·&ensp;<span style='color:#0a84ff;'>Efectivo ${_cash:,.2f}</span>"
+                  if _cash is not None else "")
 
     st.markdown(f"""
 <style>
@@ -2422,14 +2702,14 @@ def tab_dashboard() -> None:
       <div style="font-size:0.8rem;color:#48484a;margin-top:8px;font-family:DM Mono,monospace;">
         <span style="color:#636366;">≈ ${nav*fx:,.0f} MXN</span>
         &ensp;·&ensp;
-        <span>Invertido ${cost_total:,.0f}</span>
+        <span>Invertido ${cost_total:,.0f}</span>{_cash_html}
       </div>
     </div>
     <!-- Tres métricas clave -->
     <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;padding-top:4px;">
-      {_hero_stat("Hoy", f"{ic(daily_usd)} ${abs(daily_usd):,.2f}", _dc, f"{daily_pct:+.2%}")}
+      {_hero_stat(price_day_label(), f"{ic(daily_usd)} ${abs(daily_usd):,.2f}", _dc, f"{daily_pct:+.2%}")}
       {_hero_stat("P&amp;L Total", f"{ic(total_pnl)} ${abs(total_pnl):,.2f}", _tc, f"{total_ret:+.2%}")}
-      {_hero_stat(f"α vs {bench}", f"{alpha_today:+.2%}", _ac, f"{bench}: {bench_today:+.2%}")}
+      {_hero_stat(f"vs {bench}", f"{alpha_today:+.2%}", _ac, f"{bench}: {bench_today:+.2%}")}
     </div>
   </div>
 
@@ -2446,7 +2726,7 @@ def tab_dashboard() -> None:
     # Usa transacciones reales para construir el historial correcto
     # ═══════════════════════════════════════════════════════════
     _dash_txns = transactions_df()
-    _end_dash  = datetime.today()
+    _end_dash  = _today_dt()
 
     # Ventana: desde primera transacción o 120 días, lo que sea más largo
     _first_txn_dash = None
@@ -2590,7 +2870,7 @@ def tab_dashboard() -> None:
                                gridcolor="rgba(255,255,255,0.04)",
                                zeroline=False,
                                tickfont=dict(size=9, color="#636366", family="DM Mono"))
-            st.plotly_chart(fig_l, use_container_width=True, config=PLOTLY_CONFIG)
+            st.plotly_chart(fig_l, width="stretch", config=PLOTLY_CONFIG)
         else:
             st.info("Sin datos históricos aún. Agrega transacciones con fecha para ver la curva.")
 
@@ -2690,40 +2970,43 @@ def tab_dashboard() -> None:
                            zeroline=True, zerolinecolor="rgba(255,255,255,0.12)",
                            tickfont=dict(size=9, color="#636366", family="DM Mono"),
                            tickprefix="$")
-        st.plotly_chart(fig_b, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(fig_b, width="stretch", config=PLOTLY_CONFIG)
 
     with col_drift_c:
         df_dr = df_live[df_live["Drift"].abs() > 0.001]
         if tw and not df_dr.empty:
             df_dr2 = df_dr.sort_values("Drift")
-            _dr_colors = ["#30d158" if v > 0 else "#ff453a" for v in df_dr2["Drift"]]
+            # Naranja = arriba del objetivo (sobra → vender) · Azul = abajo (falta → comprar)
+            _dr_colors = ["#ff9f0a" if v > 0 else "#0a84ff" for v in df_dr2["Drift"]]
+            _dr_max = float(df_dr2["Drift"].abs().max() * 100) * 1.45 + 0.5
             fig_dr = go.Figure(go.Bar(
                 x=df_dr2["Drift"] * 100, y=df_dr2["Emisora"],
                 orientation="h",
-                marker=dict(color=_dr_colors, opacity=0.88,
+                marker=dict(color=_dr_colors, opacity=0.9,
                             line=dict(width=0), cornerradius=4),
-                hovertemplate="<b>%{y}</b>: %{x:+.1f}pp<extra></extra>",
+                hovertemplate="<b>%{y}</b>: %{x:+.1f}pp vs objetivo<extra></extra>",
                 text=[f"{v:+.1f}pp" for v in df_dr2["Drift"] * 100],
-                textposition="outside",
-                textfont=dict(size=10, color="#8e8e93", family="DM Mono"),
+                textposition="outside", cliponaxis=False,
+                textfont=dict(size=10, color="#aeaeb2", family="DM Mono"),
             ))
             fig_dr.update_layout(
                 **_pl(),
                 paper_bgcolor="#000000",
                 plot_bgcolor="#000000",
-                title=dict(text="Drift vs target",
+                title=dict(text="Drift vs objetivo · <span style='color:#ff9f0a'>■</span> sobra "
+                                "· <span style='color:#0a84ff'>■</span> falta",
                            font=dict(size=11, color="#636366", family="DM Mono"), x=0),
-                height=308, margin=dict(t=40, b=20, l=10, r=52),
+                height=308, margin=dict(t=40, b=20, l=60, r=20),
                 showlegend=False,
                 hovermode="y unified",
             )
             fig_dr.update_xaxes(showgrid=True, gridcolor="rgba(255,255,255,0.04)",
-                                zeroline=True, zerolinecolor="rgba(255,255,255,0.14)",
+                                zeroline=True, zerolinecolor="rgba(255,255,255,0.25)",
                                 tickfont=dict(size=9, color="#636366", family="DM Mono"),
-                                ticksuffix="pp")
+                                ticksuffix="pp", range=[-_dr_max, _dr_max])
             fig_dr.update_yaxes(showgrid=False, zeroline=False,
                                 tickfont=dict(size=10, color="#8e8e93", family="DM Mono"))
-            st.plotly_chart(fig_dr, use_container_width=True, config=PLOTLY_CONFIG)
+            st.plotly_chart(fig_dr, width="stretch", config=PLOTLY_CONFIG)
         else:
             st.info("Configura target weights para ver el drift.")
 
@@ -2789,8 +3072,8 @@ def tab_dashboard() -> None:
         spark  = pd_.get("spark_prices", [])
         price  = pd_.get("price", float(row_data["Precio"]))
 
-        # Card color based on intraday move (vs open), more accurate
-        chg    = chg_open if pd_.get("day_open", 0) > 0 else chg_prev
+        # El color sigue al número grande de la tarjeta (cambio vs cierre anterior)
+        chg    = chg_prev
         clr    = "#30d158" if chg >= 0 else "#ff453a"
         bg     = "rgba(48,209,88,0.04)" if chg >= 0 else "rgba(255,69,58,0.04)"
         brd    = "rgba(48,209,88,0.15)" if chg >= 0 else "rgba(255,69,58,0.15)"
@@ -3022,7 +3305,8 @@ def tab_dashboard() -> None:
     for _, _rd in df_live.iterrows():
         _t       = str(_rd["Emisora"])
         _pd      = pulse.get(_t, {})
-        _spark   = _pd.get("spark_prices", [])
+        _spark   = [v for v in _pd.get("spark_prices", [])
+                    if isinstance(v, (int, float)) and np.isfinite(v)]
         _price   = float(_rd["Precio"])
         _pnl_pct = float(_rd["P&L %"])
         _day_pct = float(_rd["Var. Día %"])
@@ -3124,7 +3408,7 @@ def tab_dashboard() -> None:
   <table style="width:100%;border-collapse:collapse;">
     <thead><tr>
       <th style="{_th}padding-left:20px;">Emisora</th>
-      <th style="{_th}">30D</th>
+      <th style="{_th}">Intradía</th>
       <th style="{_th}">Precio</th>
       <th style="{_th}padding-left:12px;">P&amp;L</th>
       <th style="{_th}padding-left:12px;">Hoy</th>
@@ -3142,7 +3426,7 @@ def tab_dashboard() -> None:
     # ═══════════════════════════════════════════════════════════
     section("PRÓXIMOS EVENTOS")
     _evts = fetch_events_data(tuple(sorted(tickers)))
-    _today = datetime.today().date()
+    _today = _today_dt().date()
     _col_earn, _col_div = st.columns(2, gap="small")
 
     with _col_earn:
@@ -3244,17 +3528,29 @@ def tab_dashboard() -> None:
     # ═══════════════════════════════════════════════════════════
     txns = transactions_df()
     if not txns.empty:
-        recent = txns.sort_values("Date", ascending=False).head(6)
+        recent = _sort_txns(txns).iloc[::-1].head(6)
+        _act_style = {   # tipo: (color, rgb, icono, signo)
+            "BUY":        ("#30d158", "48,209,88",  "↑", "+"),
+            "SELL":       ("#ff453a", "255,69,58",  "↓", "-"),
+            "ADJUSTMENT": ("#ffb300", "255,179,0",  "⟳", ""),
+            "DIVIDEND":   ("#64d2ff", "100,210,255", "$", "+"),
+            "DEPOSIT":    ("#0a84ff", "10,132,255", "⇣", "+"),
+            "WITHDRAW":   ("#bf5af2", "191,90,242", "⇡", "-"),
+        }
         rows_html = ""
         for _, r in recent.iterrows():
-            is_buy  = str(r["Type"]).upper() == "BUY"
-            clr     = "#30d158" if is_buy else "#ff453a"
-            bg_rgb  = "48,209,88" if is_buy else "255,69,58"
-            icon    = "↑" if is_buy else "↓"
-            monto   = float(r["Shares"]) * float(r["Price"])
-            tipo    = "Compra" if is_buy else "Venta"
+            _tp     = str(r["Type"]).upper()
+            clr, bg_rgb, icon, sign = _act_style.get(_tp, _act_style["BUY"])
+            _sh, _px = float(r["Shares"]), float(r["Price"])
+            is_cash = _tp in _CASH_TYPES
+            monto   = _txn_amount(_sh, _px) if is_cash else _sh * _px
+            tipo    = TXN_LABELS.get(_tp, _tp)
             notes_s = f" · {r['Notes']}" if str(r.get("Notes","")).strip() else ""
-            sign    = "+" if is_buy else "-"
+            _detail = (tipo if is_cash else
+                       f"{tipo} · {_sh:.4f} @ ${_px:.2f}" if _tp != "ADJUSTMENT" else
+                       f"{tipo} · {_sh:.4f} títulos · costo ${_px:.2f}")
+            if _tp == "ADJUSTMENT":
+                monto = _sh * _px
             rows_html += f"""
 <div style="display:flex;justify-content:space-between;align-items:center;
             padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
@@ -3266,14 +3562,14 @@ def tab_dashboard() -> None:
       <span style="font-family:DM Mono,monospace;font-weight:700;color:#ffffff;
                    font-size:0.88rem;">{r["Ticker"]}</span>
       <span style="font-size:0.76rem;color:#8e8e93;margin-left:8px;">
-        {tipo} · {float(r["Shares"]):.4f} @ ${float(r["Price"]):.2f}{notes_s}
+        {_detail}{notes_s}
       </span>
     </div>
   </div>
   <div style="text-align:right;flex-shrink:0;">
     <div style="font-family:DM Mono,monospace;font-weight:700;color:{clr};
                 font-size:0.88rem;">{sign}${monto:,.2f}</div>
-    <div style="font-size:0.7rem;color:#48484a;">{r["Date"]}</div>
+    <div style="font-size:0.7rem;color:#48484a;">{r["Date"].date()}</div>
   </div>
 </div>"""
 
@@ -3351,7 +3647,7 @@ def csv_rebalance_to_transactions(content: bytes, txn_date: str | None = None) -
         return [], [f"Columnas no encontradas: {', '.join(missing)}. "
                     f"Columnas disponibles: {', '.join(df.columns.tolist())}"]
 
-    use_date = txn_date or str(date.today())
+    use_date = txn_date or str(_today_mx())
     errors, rows = [], []
 
     for i, row in df.iterrows():
@@ -3400,6 +3696,16 @@ def csv_rebalance_to_transactions(content: bytes, txn_date: str | None = None) -
     return rows, errors
 
 
+_TYPE_ALIASES = {
+    **{k: "BUY"  for k in ("BUY", "COMPRA", "C", "B", "1")},
+    **{k: "SELL" for k in ("SELL", "VENTA", "V", "S", "-1")},
+    **{k: "ADJUSTMENT" for k in ("ADJUSTMENT", "AJUSTE", "ADJ")},
+    **{k: "DIVIDEND"   for k in ("DIVIDEND", "DIVIDENDO", "DIV")},
+    **{k: "DEPOSIT"    for k in ("DEPOSIT", "DEPOSITO", "DEPÓSITO")},
+    **{k: "WITHDRAW"   for k in ("WITHDRAW", "RETIRO", "WITHDRAWAL")},
+}
+
+
 def csv_to_transactions(content: bytes) -> tuple[list[dict], list[str]]:
     try:
         df = pd.read_csv(pd.io.common.BytesIO(content))
@@ -3425,10 +3731,16 @@ def csv_to_transactions(content: bytes) -> tuple[list[dict], list[str]]:
             errors.append(f"Fila {line}: Ticker vacío, omitida.")
             continue
         raw_type = str(row.get("Type","BUY")).strip().upper()
-        txn_type = "BUY" if raw_type in ("BUY","COMPRA","C","B","1") else                    "SELL" if raw_type in ("SELL","VENTA","V","S","-1") else "BUY"
+        if raw_type in ("", "NAN"):
+            raw_type = "BUY"
+        txn_type = _TYPE_ALIASES.get(raw_type)
+        if txn_type is None:
+            errors.append(f"Fila {line}: tipo '{raw_type}' no reconocido, omitida."); continue
         try:
-            shares = float(row.get("Shares",0))
-            if shares <= 0:
+            shares = float(str(row.get("Shares",0)).replace(",", "") or 0)
+            if shares != shares:   # NaN
+                shares = 0.0
+            if shares < 0 or (shares == 0 and txn_type not in _CASH_TYPES):
                 errors.append(f"Fila {line}: Shares ≤ 0, omitida."); continue
         except Exception:
             errors.append(f"Fila {line}: Shares inválido, omitida."); continue
@@ -3438,9 +3750,9 @@ def csv_to_transactions(content: bytes) -> tuple[list[dict], list[str]]:
             price = 0.0
         try:
             parsed = pd.to_datetime(str(row.get("Date","")), errors="coerce")
-            txn_date = parsed.strftime("%Y-%m-%d") if pd.notna(parsed) else str(date.today())
+            txn_date = parsed.strftime("%Y-%m-%d") if pd.notna(parsed) else str(_today_mx())
         except Exception:
-            txn_date = str(date.today())
+            txn_date = str(_today_mx())
         notes = str(row.get("Notes","")).strip()
         if notes.lower() == "nan": notes = ""
         rows.append({"Ticker":ticker,"Type":txn_type,"Shares":shares,
@@ -3464,33 +3776,30 @@ def tab_editor() -> None:
         sel   = st.selectbox("Portafolio:", ["── Nuevo ──"] + saved)
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("📂 Cargar", use_container_width=True):
+            if st.button("📂 Cargar", width="stretch"):
                 if sel != "── Nuevo ──":
                     data = load_portfolio(sel)
                     if data:
-                        st.session_state["portfolio_name"] = data.get("name", sel)
-                        st.session_state["benchmark"]      = data.get("benchmark", "SPY")
-                        st.session_state["transactions"]    = data.get("transactions", [])
-                        st.session_state["target_weights"]  = data.get("target_weights", {})
-                        st.session_state["thesis"]           = data.get("thesis", {})
-                        st.session_state["alerts"]           = data.get("alerts", [])
-                        st.session_state["extra_benchmarks"] = data.get("extra_benchmarks", [])
-                        st.session_state["perf_custom_start"]= data.get("perf_custom_start")
-                        st.session_state["perf_use_custom"]  = data.get("perf_use_custom", False)
-                        st.session_state["watchlist"]        = data.get("watchlist", [])
-                        st.success(f"Cargado: {sel}")
+                        apply_portfolio_data(data, sel)
+                        st.session_state["_flash"] = f"📂 Cargado: {sel}"
                         st.rerun()
         with c2:
-            if st.button("🗑️ Eliminar", use_container_width=True, type="secondary"):
-                if sel != "── Nuevo ──":
+            with st.popover("🗑️ Eliminar", width="stretch",
+                            disabled=(sel == "── Nuevo ──")):
+                st.warning(f"¿Eliminar **{sel}** definitivamente? También se borra de GitHub.")
+                if st.button("Sí, eliminar", type="primary", key="confirm_del_pf"):
                     delete_portfolio(sel)
-                    st.toast(f"Eliminado: {sel}")
+                    if st.session_state.get("portfolio_name") == sel:
+                        st.session_state["portfolio_name"] = ""   # evita que el autoguardado lo recree
+                    st.session_state["_flash"] = f"🗑️ Eliminado: {sel}"
                     st.rerun()
 
         st.divider()
-        pname       = st.text_input("Nombre:", value=st.session_state.get("portfolio_name",""), key="pname_in")
+        if "pname_in" not in st.session_state:
+            st.session_state["pname_in"] = st.session_state.get("portfolio_name", "")
+        pname       = st.text_input("Nombre:", key="pname_in")
         bench_input = st.text_input("Benchmark:", value=st.session_state.get("benchmark","SPY"))
-        if st.button("💾 Guardar", use_container_width=True, type="primary"):
+        if st.button("💾 Guardar", width="stretch", type="primary"):
             if pname.strip():
                 st.session_state["portfolio_name"] = pname.strip()
                 st.session_state["benchmark"]      = bench_input.strip().upper()
@@ -3500,9 +3809,17 @@ def tab_editor() -> None:
                     target_weights=st.session_state.get("target_weights", {}),
                     benchmark=bench_input.strip().upper(),
                 )
-                st.success("Guardado ✓")
+                st.session_state["_last_saved_fp"] = _txns_fingerprint(_persisted_state())
+                _remember_last_portfolio(pname.strip())
+                st.success("Guardado ✓ — a partir de ahora los cambios se guardan solos.")
             else:
                 st.warning("Ingresa un nombre primero.")
+        if st.session_state.get("portfolio_name"):
+            _saved_at = st.session_state.get("_last_saved_at")
+            st.caption("☁️ Guardado automático activo"
+                       + (f" · último guardado {_saved_at}" if _saved_at else ""))
+        else:
+            st.caption("⚠️ Ponle nombre y presiona Guardar: sin nombre los cambios no se guardan.")
 
         st.divider()
 
@@ -3519,7 +3836,7 @@ def tab_editor() -> None:
                 data=csv_bytes,
                 file_name=f"{pname_dl}_txns_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width="stretch",
                 help="Guarda una copia de seguridad de todas tus transacciones.",
             )
         else:
@@ -3542,7 +3859,7 @@ def tab_editor() -> None:
                 horizontal=True,
                 key="csv_import_mode",
             )
-            if st.button("📥 Confirmar importación", use_container_width=True, type="primary",
+            if st.button("📥 Confirmar importación", width="stretch", type="primary",
                          key="csv_confirm"):
                 new_txns, errs = csv_to_transactions(uploaded.read())
 
@@ -3553,6 +3870,7 @@ def tab_editor() -> None:
                         st.warning(f"… y {len(errs)-5} advertencias más.")
 
                 if new_txns:
+                    _push_undo("importar CSV")
                     if import_mode == "Reemplazar todo el log":
                         st.session_state["transactions"] = new_txns
                         st.success(f"✅ {len(new_txns)} transacciones importadas (log reemplazado).")
@@ -3595,13 +3913,13 @@ def tab_editor() -> None:
 
             reb_date = st.date_input(
                 "Fecha de ejecución de las operaciones:",
-                value=date.today(),
+                value=_today_mx(),
                 key="reb_import_date",
                 help="Fecha en que ejecutaste las órdenes en tu broker.",
             )
 
             if st.button("📥 Importar al log de transacciones", type="primary",
-                         use_container_width=True, key="reb_import_btn"):
+                         width="stretch", key="reb_import_btn"):
                 new_txns, errs = csv_rebalance_to_transactions(
                     preview_bytes, txn_date=str(reb_date)
                 )
@@ -3613,6 +3931,7 @@ def tab_editor() -> None:
                         st.warning(f"… y {len(errs)-5} advertencias más.")
 
                 if new_txns:
+                    _push_undo("importar plan de rebalanceo")
                     existing = st.session_state.get("transactions", [])
                     st.session_state["transactions"] = existing + new_txns
                     st.success(
@@ -3632,7 +3951,7 @@ def tab_editor() -> None:
                             "Notes":  st.column_config.TextColumn("Notas"),
                         },
                         hide_index=True,
-                        use_container_width=True,
+                        width="stretch",
                     )
                     st.rerun()
                 else:
@@ -3645,17 +3964,34 @@ def tab_editor() -> None:
 
         # ── Formulario nueva transacción ──────────────────────
         section("REGISTRAR TRANSACCIÓN")
-        txn_type   = st.radio("Tipo:", ["BUY 🟢", "SELL 🔴"], horizontal=True)
-        txn_ticker = st.selectbox("Ticker:", UNIVERSE, key="txn_ticker")
+        _form_types = {"Compra 🟢": "BUY", "Venta 🔴": "SELL", "Dividendo 💵": "DIVIDEND",
+                       "Depósito ⇣": "DEPOSIT", "Retiro ⇡": "WITHDRAW"}
+        txn_type_lbl = st.radio("Tipo:", list(_form_types), horizontal=True, key="txn_type")
+        tipo    = _form_types[txn_type_lbl]
+        is_sell = tipo == "SELL"
+        is_cash = tipo in _CASH_TYPES
 
-        # Detectar posición actual para botones rápidos de venta
-        is_sell    = txn_type.startswith("SELL")
-        pos_now    = holdings_df()
-        pos_row    = pos_now[pos_now["Ticker"] == txn_ticker] if not pos_now.empty else pd.DataFrame()
-        owned_now  = float(pos_row["Shares"].iloc[0]) if not pos_row.empty else 0.0
-        avg_cost_now = float(pos_row["AvgCost"].iloc[0]) if not pos_row.empty else 0.0
+        pos_now = holdings_df()
+        held_list = pos_now["Ticker"].tolist() if not pos_now.empty else []
+        if tipo in ("DEPOSIT", "WITHDRAW"):
+            txn_ticker = CASH_TICKER
+            st.caption("Movimiento de efectivo en tu cuenta del broker (no afecta posiciones).")
+        else:
+            # Tus posiciones primero; también se puede escribir cualquier ticker
+            opts = list(dict.fromkeys(held_list + UNIVERSE))
+            txn_ticker = st.selectbox(
+                "Ticker:", opts, key="txn_ticker", accept_new_options=True,
+                help="Escribe cualquier símbolo de Yahoo Finance si no aparece en la lista.",
+            )
+            txn_ticker = (txn_ticker or "").strip().upper()
+            if txn_ticker.endswith(".MX"):
+                st.warning("⚠️ Los tickers .MX cotizan en **pesos** y el portafolio suma todo "
+                           "en dólares: el valor y el P&L de esta posición saldrían mezclados. "
+                           "Si existe, usa el ADR o ETF en dólares.")
 
-        # Botones de porcentaje rápido solo al vender y si hay posición
+        pos_row      = pos_now[pos_now["Ticker"] == txn_ticker] if not pos_now.empty else pd.DataFrame()
+        owned_now    = float(pos_row["Shares"].iloc[0]) if not pos_row.empty else 0.0
+
         if is_sell and owned_now > 0:
             st.markdown(
                 f"<div style='font-size:0.72rem;color:#8e8e93;font-family:DM Mono,monospace;"
@@ -3665,55 +4001,67 @@ def tab_editor() -> None:
             pcts = [(qb1,"25%",0.25),(qb2,"50%",0.50),(qb3,"75%",0.75),(qb4,"100% 🔴",1.0)]
             for col, label, pct in pcts:
                 with col:
-                    if st.button(label, key=f"qsell_{pct}", use_container_width=True):
+                    if st.button(label, key=f"qsell_{pct}", width="stretch"):
                         st.session_state["_txn_sh_val"] = round(owned_now * pct, 8)
                         st.rerun()
 
-        # Inicializar valor del input desde botón rápido o default
-        _default_shares = st.session_state.pop("_txn_sh_val", 0.0)
+        # Tras confirmar: limpiar campos (debe hacerse antes de crear los widgets)
+        if st.session_state.pop("_txn_reset", False):
+            st.session_state["txn_sh"] = 0.0
+            st.session_state["txn_px"] = 0.0
+            st.session_state["txn_amt"] = 0.0
+            st.session_state["txn_notes"] = ""
+        # Los botones rápidos escriben directo en el estado del campo (antes de crearlo)
+        if "_txn_sh_val" in st.session_state:
+            st.session_state["txn_sh"] = float(st.session_state.pop("_txn_sh_val"))
+        if "_txn_px_val" in st.session_state:
+            st.session_state["txn_px"] = float(st.session_state.pop("_txn_px_val"))
 
-        tc1, tc2 = st.columns(2)
-        with tc1:
-            txn_shares = st.number_input(
-                "Títulos:", min_value=0.0, step=0.001, format="%.6f",
-                value=float(_default_shares), key="txn_sh",
-            )
-        with tc2:
-            txn_price = st.number_input(
-                "Precio ($):", min_value=0.0, step=0.01, format="%.4f", key="txn_px",
-            )
-        txn_date  = st.date_input("Fecha:", value=date.today(), key="txn_dt")
+        if is_cash:
+            txn_shares = 0.0
+            txn_price = st.number_input("Monto ($USD):", min_value=0.0, step=1.0,
+                                        format="%.2f", key="txn_amt")
+        else:
+            tc1, tc2 = st.columns(2)
+            with tc1:
+                txn_shares = st.number_input("Títulos:", min_value=0.0, step=0.001,
+                                             format="%.6f", key="txn_sh")
+            with tc2:
+                txn_price = st.number_input("Precio ($):", min_value=0.0, step=0.01,
+                                            format="%.4f", key="txn_px")
+            live_px = fetch_live_prices((txn_ticker,)).get(txn_ticker, {}).get("price", 0) \
+                if txn_ticker else 0
+            if live_px > 0:
+                if st.button(f"↧ Usar precio de mercado (${live_px:,.2f})", key="txn_use_mkt"):
+                    st.session_state["_txn_px_val"] = round(float(live_px), 4)
+                    st.rerun()
+        txn_date  = st.date_input("Fecha:", value=_today_mx(), key="txn_dt")
         txn_notes = st.text_input("Notas (opcional):", key="txn_notes")
 
-        # Advertencia si el precio está vacío y es venta (sugerir precio de mercado)
-        if is_sell and owned_now > 0 and txn_shares > 0 and txn_price == 0:
-            live_px = fetch_live_prices([txn_ticker]).get(txn_ticker, {}).get("price", 0)
-            if live_px > 0:
-                st.info(f"💡 Precio de mercado actual de {txn_ticker}: **${live_px:,.2f}**")
-
         # Preview del impacto ANTES de confirmar
-        if txn_shares > 0 and txn_price > 0:
-            monto = txn_shares * txn_price
-            color_prev = "#30d158" if not is_sell else "#ff453a"
-            tipo_label = "Compra" if not is_sell else "Venta"
+        monto = txn_price if is_cash else txn_shares * txn_price
+        if monto > 0:
+            color_prev = {"BUY": "#30d158", "SELL": "#ff453a", "DIVIDEND": "#64d2ff",
+                          "DEPOSIT": "#0a84ff", "WITHDRAW": "#bf5af2"}[tipo]
             pct_pos = f" ({txn_shares/owned_now:.0%} de tu posición)" if is_sell and owned_now > 0 else ""
+            _what = (f"{TXN_LABELS[tipo]} de <b style='color:#ffffff'>{txn_ticker}</b>" if tipo == "DIVIDEND"
+                     else TXN_LABELS[tipo] if is_cash
+                     else f"{TXN_LABELS[tipo]} &nbsp;·&nbsp; {txn_shares:.6f} títulos de "
+                          f"<b style='color:#ffffff'>{txn_ticker}</b>{pct_pos} &nbsp;·&nbsp; @ ${txn_price:.4f}")
             st.markdown(f"""
 <div style="background:rgba(255,255,255,0.04);border-radius:10px;
             padding:12px 14px;margin-top:8px;font-family:DM Mono,monospace;
             font-size:0.85rem;border:1px solid rgba(255,255,255,0.07);">
-  <span style="color:{color_prev};font-weight:700;">{tipo_label}</span>
-  &nbsp;·&nbsp; {txn_shares:.6f} títulos de
-  <b style="color:#ffffff">{txn_ticker}</b>{pct_pos}
-  &nbsp;·&nbsp; @ ${txn_price:.4f}
+  <span style="color:{color_prev};font-weight:700;">{_what}</span>
   <br><span style="color:#aeaeb2;">Monto total: </span>
   <b style="color:{color_prev};">${monto:,.2f}</b>
 </div>""", unsafe_allow_html=True)
 
-        if st.button("✅ Confirmar Transacción", use_container_width=True, type="primary"):
-            if txn_ticker and txn_shares > 0 and txn_price > 0:
-                tipo = "BUY" if not is_sell else "SELL"
-                if tipo == "SELL":
-                    # FIX: usar tolerancia para permitir vender exactamente lo que se tiene
+        if st.button("✅ Confirmar Transacción", width="stretch", type="primary"):
+            valid = txn_ticker and (monto > 0 if is_cash else (txn_shares > 0 and txn_price > 0))
+            if valid:
+                if is_sell:
+                    # Tolerancia para permitir vender exactamente lo que se tiene
                     if txn_shares > owned_now + 1e-4:
                         st.error(
                             f"No puedes vender {txn_shares:.6f} de {txn_ticker}. "
@@ -3721,13 +4069,12 @@ def tab_editor() -> None:
                             f"Usa el botón **100%** para liquidar la posición completa."
                         )
                         st.stop()
-                    # Si se vende "todo" (dentro de tolerancia), usar exactamente owned_now
                     if abs(txn_shares - owned_now) < 1e-4:
                         txn_shares = owned_now
 
-                txns = st.session_state.get("transactions", [])
+                txns = list(st.session_state.get("transactions", []))
                 txns.append({
-                    "Ticker": txn_ticker.upper(),
+                    "Ticker": txn_ticker,
                     "Type":   tipo,
                     "Shares": txn_shares,
                     "Price":  txn_price,
@@ -3735,11 +4082,14 @@ def tab_editor() -> None:
                     "Notes":  txn_notes.strip(),
                 })
                 st.session_state["transactions"] = txns
-                verb = "Comprada" if tipo == "BUY" else "Vendida"
-                st.success(f"{verb}: {txn_shares:.6f} × {txn_ticker} @ ${txn_price:.4f}")
+                st.session_state["_flash"] = (
+                    f"✅ {TXN_LABELS[tipo]}: ${monto:,.2f}" if is_cash
+                    else f"✅ {TXN_LABELS[tipo]}: {txn_shares:.6f} × {txn_ticker} @ ${txn_price:.4f}")
+                st.session_state["_txn_reset"] = True
                 st.rerun()
             else:
-                st.warning("Completa todos los campos (títulos y precio > 0).")
+                st.warning("Completa todos los campos (títulos y precio > 0, o monto > 0).")
+
 
     # ── Panel derecho ─────────────────────────────────────────
     with col_right:
@@ -3760,35 +4110,59 @@ def tab_editor() -> None:
                 txns_edit = txns_df.copy()
                 txns_edit["Date"] = pd.to_datetime(txns_edit["Date"], errors="coerce")
 
+                st.caption("Tipos: BUY compra · SELL venta · ADJUSTMENT ajuste de broker "
+                           "(Títulos = reales, Precio = costo promedio) · DIVIDEND / DEPOSIT / "
+                           "WITHDRAW (monto en Precio, Títulos = 0)")
                 edited_txns = st.data_editor(
-                    txns_edit,
+                    txns_edit[["Ticker", "Type", "Shares", "Price", "Date", "Notes"]],
                     column_config={
-                        "Ticker": st.column_config.SelectboxColumn("Ticker",  options=UNIVERSE, width="small"),
-                        "Type":   st.column_config.SelectboxColumn("Tipo",    options=["BUY","SELL"], width="small"),
+                        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                        "Type":   st.column_config.SelectboxColumn("Tipo", options=TXN_TYPES, width="small"),
                         "Shares": st.column_config.NumberColumn("Títulos",   format="%.6f", min_value=0),
                         "Price":  st.column_config.NumberColumn("Precio ($)", format="%.4f", min_value=0),
                         "Date":   st.column_config.DateColumn("Fecha"),
                         "Notes":  st.column_config.TextColumn("Notas"),
                     },
                     num_rows="dynamic",
-                    use_container_width=True,
+                    width="stretch",
                     key="txns_editor",
                 )
 
-                col_apply, col_clear = st.columns(2)
+                col_apply, col_clear, col_undo = st.columns(3)
                 with col_apply:
-                    if st.button("✅ Aplicar cambios al log", use_container_width=True):
+                    if st.button("✅ Aplicar cambios al log", width="stretch"):
                         rows = edited_txns.dropna(subset=["Ticker"]).copy()
-                        rows = rows[rows["Ticker"].astype(str).str.strip() != ""]
+                        rows["Ticker"] = rows["Ticker"].astype(str).str.strip().str.upper()
+                        rows = rows[rows["Ticker"] != ""]
+                        rows["Type"]   = rows["Type"].fillna("BUY").astype(str).str.upper()
+                        rows["Shares"] = pd.to_numeric(rows["Shares"], errors="coerce").fillna(0.0)
+                        rows["Price"]  = pd.to_numeric(rows["Price"],  errors="coerce").fillna(0.0)
+                        rows["Notes"]  = rows["Notes"].fillna("").astype(str)
                         rows["Date"] = rows["Date"].apply(
-                            lambda x: x.strftime("%Y-%m-%d") if pd.notnull(x) else str(date.today())
+                            lambda x: x.strftime("%Y-%m-%d") if pd.notnull(x) else str(_today_mx())
                         )
+                        _push_undo("editar el log")
                         st.session_state["transactions"] = rows.to_dict("records")
-                        st.success("Log actualizado.")
+                        st.session_state.pop("txns_editor", None)
+                        st.session_state["_flash"] = "✅ Log actualizado."
                         st.rerun()
                 with col_clear:
-                    if st.button("🗑️ Borrar todo el log", use_container_width=True, type="secondary"):
-                        st.session_state["transactions"] = []
+                    with st.popover("🗑️ Borrar todo el log", width="stretch"):
+                        st.warning(f"Se borrarán las {len(txns_df)} transacciones. "
+                                   "Podrás deshacerlo con ↩ mientras no cierres la app.")
+                        if st.button("Sí, borrar todo", type="primary", key="confirm_clear_log"):
+                            _push_undo("borrar el log")
+                            st.session_state["transactions"] = []
+                            st.rerun()
+            undo = st.session_state.get("_txns_undo")
+            if undo:
+                with (col_undo if not txns_df.empty else st.container()):
+                    if st.button(f"↩ Deshacer ({undo['what']})", width="stretch",
+                                 key="undo_txns"):
+                        st.session_state["transactions"] = undo["txns"]
+                        st.session_state.pop("_txns_undo", None)
+                        st.session_state.pop("txns_editor", None)
+                        st.session_state["_flash"] = "↩ Cambio deshecho."
                         st.rerun()
 
         # ── Sub-tab: Posiciones derivadas ─────────────────────
@@ -3822,11 +4196,11 @@ def tab_editor() -> None:
                         "P&L No Real. $":  unreal,
                         "P&L Realizado $": real_pnl,
                         "P&L Total $":     unreal + real_pnl,
-                        "P&L %":           (px - ac) / ac if ac > 0 else 0.0,
+                        "P&L %":           (px - ac) / ac * 100 if ac > 0 else 0.0,
                     })
 
                 df_pos = pd.DataFrame(pos_rows)
-                df_pos["% Cartera"] = df_pos["Valor Merc. $"] / nav_pos if nav_pos > 0 else 0.0
+                df_pos["% Cartera"] = df_pos["Valor Merc. $"] / nav_pos * 100 if nav_pos > 0 else 0.0
 
                 st.dataframe(
                     df_pos,
@@ -3848,10 +4222,10 @@ def tab_editor() -> None:
                             help="Abierto + Realizado"),
                         "P&L %":           st.column_config.NumberColumn(format="%+.2f%%"),
                         "% Cartera":       st.column_config.ProgressColumn(
-                            format="%.1f%%", min_value=0, max_value=1),
+                            format="%.1f%%", min_value=0, max_value=100),
                     },
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                 )
 
                 # ── Posiciones cerradas ────────────────────────────────
@@ -3865,7 +4239,7 @@ def tab_editor() -> None:
                             "Ingresos $":   info["proceeds"],
                             "Costo base $": info["cost_sold"],
                             "P&L Real. $":  info["realized_pnl"],
-                            "P&L Real. %":  info["realized_pnl"] / info["cost_sold"]
+                            "P&L Real. %":  info["realized_pnl"] / info["cost_sold"] * 100
                                             if info["cost_sold"] > 0 else 0.0,
                         })
 
@@ -3891,7 +4265,7 @@ def tab_editor() -> None:
                                 "Retorno", format="%+.2f%%"),
                         },
                         hide_index=True,
-                        use_container_width=True,
+                        width="stretch",
                     )
                     total_closed_pnl = sum(r["P&L Real. $"] for r in closed_rows)
                     clr = "#30d158" if total_closed_pnl >= 0 else "#ff453a"
@@ -3969,7 +4343,7 @@ def tab_editor() -> None:
                         ),
                     },
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     key="sync_editor",
                 )
 
@@ -3991,14 +4365,15 @@ def tab_editor() -> None:
                     apply_sync = st.button(
                         "🔄 Aplicar Sincronización",
                         type="primary",
-                        use_container_width=True,
+                        width="stretch",
                         key="apply_broker_sync",
                         disabled=to_sync.empty,
                     )
 
                 if apply_sync and not to_sync.empty:
+                    _push_undo("sincronizar con broker")
                     txns_current = list(st.session_state.get("transactions", []))
-                    today_str    = str(date.today())
+                    today_str    = str(_today_mx())
                     n_applied    = 0
                     for _, srow in to_sync.iterrows():
                         ticker    = str(srow["Ticker"])
@@ -4019,18 +4394,11 @@ def tab_editor() -> None:
 
                     if n_applied > 0:
                         st.session_state["transactions"] = txns_current
-                        port_name = st.session_state.get("active_portfolio", "")
-                        if port_name:
-                            save_portfolio(
-                                port_name, txns_current,
-                                st.session_state.get("target_weights", {}),
-                                st.session_state.get("benchmark", "SPY"),
-                            )
-                        st.success(
+                        st.session_state.pop("sync_editor", None)
+                        st.session_state["_flash"] = (
                             f"✅ Sincronización aplicada: {n_applied} posición"
                             f"{'es' if n_applied>1 else ''} actualizada"
-                            f"{'s' if n_applied>1 else ''}. "
-                            "El historial anterior se preservó."
+                            f"{'s' if n_applied>1 else ''}. El historial anterior se preservó."
                         )
                         st.rerun()
             else:
@@ -4070,7 +4438,7 @@ def tab_editor() -> None:
                     f"{'✓' if ok else '← debe ser 100%'}</p>",
                     unsafe_allow_html=True,
                 )
-                if st.button("💾 Guardar pesos objetivo", use_container_width=True):
+                if st.button("💾 Guardar pesos objetivo", width="stretch"):
                     st.session_state["target_weights"] = {k: v for k, v in tw_updated.items() if v > 0}
                     st.success("Pesos objetivo guardados.")
             else:
@@ -4082,8 +4450,6 @@ def tab_editor() -> None:
 # ─────────────────────────────────────────────────────────────
 
 from scipy.optimize import minimize as _sp_minimize
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
 
 STRATEGIES = ["SmartCluster", "MinVar", "MaxReturn", "ERC"]
 
@@ -4252,7 +4618,7 @@ def optimize_to_target_weights(tickers: list[str], returns_df: pd.DataFrame,
     SmartCluster   : MaxSharpe con restricciones de cluster por correlación.
     """
     locked_tickers = [t for t in (locked_tickers or []) if t in tickers]
-    rets = returns_df[tickers].dropna(how="all").fillna(0)
+    rets = returns_df[tickers].dropna(how="all")
     if len(rets) < 30 or len(tickers) < 2:
         eq = 1.0 / len(tickers)
         return {t: eq for t in tickers}
@@ -4260,10 +4626,10 @@ def optimize_to_target_weights(tickers: list[str], returns_df: pd.DataFrame,
     def _single_pass(tkrs: list[str], rets_df: pd.DataFrame,
                      locked: list[str]) -> tuple[dict, np.ndarray | None]:
         """Ejecuta una pasada de optimización y devuelve (result_dict, cluster_labels)."""
-        r   = rets_df[tkrs].dropna(how="all").fillna(0)
+        r   = rets_df[tkrs].dropna(how="all")
         mu_ = _robust_mu(r, tkrs)
-        vol_= np.sqrt(np.diag(r.cov().values * TRADING_DAYS))
-        cov_= r.cov().values * TRADING_DAYS
+        cov_= _robust_cov(r, tkrs)
+        vol_= np.sqrt(np.diag(cov_))
         n_  = len(tkrs)
 
         lf   = max(1 / (2 * max(n_, 1)), 0.01)
@@ -4292,7 +4658,7 @@ def optimize_to_target_weights(tickers: list[str], returns_df: pd.DataFrame,
                 tkrs, mu_, vol_, r, n_clusters=n_clusters, max_cluster_w=max_cluster_w)
             extra_.extend(cc_)
 
-        w_ = _run_optimization(mu_, cov_, r, rf, strategy, max_w,
+        w_ = _run_optimization(mu_, cov_, r.fillna(0), rf, strategy, max_w,
                                bounds=bds, extra_constraints=extra_)
         res_ = {t_: float(w_[i_]) for i_, t_ in enumerate(tkrs)}
 
@@ -4337,9 +4703,9 @@ def optimize_to_target_weights(tickers: list[str], returns_df: pd.DataFrame,
     # ── Guardar info de clusters para visualización ───────────
     if cluster_labels is not None:
         _tkrs_pass = [t for t in tickers if result.get(t, 0) > 0.001]
-        mu_full    = _robust_mu(rets[tickers].dropna(how="all").fillna(0), tickers)
+        mu_full    = _robust_mu(rets, tickers)
         vol_full   = np.sqrt(np.diag(
-            rets[tickers].dropna(how="all").fillna(0).cov().values * TRADING_DAYS))
+            _robust_cov(rets, tickers)))
         st.session_state["smart_cluster_labels"] = {
             t: int(cluster_labels[i]) for i, t in enumerate(_tkrs_pass)
             if i < len(cluster_labels)
@@ -4368,12 +4734,17 @@ def _robust_mu(returns_df: pd.DataFrame, tickers: list[str],
          Para referencia: S&P 500 ha promediado ~10% anual históricamente.
          60% permite capturar growth stocks sin permitir extrapolaciones absurdas.
     """
-    rets  = returns_df[tickers].dropna(how="all").fillna(0)
-    mu    = rets.mean().values * TRADING_DAYS           # aritmética base
+    rets  = returns_df[tickers].dropna(how="all")
+    # Media solo sobre los días con datos (rellenar con 0 los días previos a una
+    # IPO subestimaba su retorno y su riesgo)
+    mu    = rets.mean().fillna(0).values * TRADING_DAYS
 
-    # James-Stein shrinkage toward cross-sectional mean
-    mu_bar = mu.mean()                                  # media del grupo
-    mu_sh  = (1 - shrink) * mu + shrink * mu_bar       # shrinkage
+    # James-Stein shrinkage hacia la media del grupo; más fuerte con poca historia:
+    # un activo con 3 meses de datos se acerca más al promedio que uno con 3 años.
+    n_obs  = rets.notna().sum().values
+    k      = np.clip(np.maximum(shrink, 1 - n_obs / TRADING_DAYS), shrink, 0.9)
+    mu_bar = mu.mean()
+    mu_sh  = (1 - k) * mu + k * mu_bar
 
     # Cap simétrico
     mu_capped = np.clip(mu_sh, -cap, cap)
@@ -4381,13 +4752,29 @@ def _robust_mu(returns_df: pd.DataFrame, tickers: list[str],
     return mu_capped
 
 
+def _robust_cov(returns_df: pd.DataFrame, tickers: list[str], shrink: float = 0.10) -> np.ndarray:
+    """
+    Covarianza anualizada usando solo los días en que ambos activos cotizaban
+    (sin rellenar con ceros), encogida hacia la diagonal y forzada a ser
+    semidefinida positiva para que el optimizador sea estable.
+    """
+    r   = returns_df[tickers].dropna(how="all")
+    cov = r.cov(min_periods=20).values * TRADING_DAYS
+    var = np.nan_to_num(np.diag(cov), nan=np.nanmean(np.diag(cov)))
+    cov = np.where(np.isnan(cov), 0.0, cov)
+    np.fill_diagonal(cov, var)
+    cov = (1 - shrink) * cov + shrink * np.diag(var)
+    w, v = np.linalg.eigh((cov + cov.T) / 2)
+    return (v * np.clip(w, 1e-8, None)) @ v.T
+
+
 def get_frontier_points(tickers: list[str], returns_df: pd.DataFrame,
                         rf: float, max_w: float, n_pts: int = 400) -> pd.DataFrame:
     """Genera puntos de la frontera eficiente para graficar."""
-    rets = returns_df[tickers].dropna(how="all").fillna(0)
+    rets = returns_df[tickers].dropna(how="all")
     if len(rets) < 30: return pd.DataFrame()
     mu  = _robust_mu(rets, list(rets.columns))
-    cov = rets.cov().values * TRADING_DAYS
+    cov = _robust_cov(rets, list(rets.columns))
     rows = []
     for _ in range(n_pts):
         w = np.random.dirichlet(np.ones(len(tickers)))
@@ -4693,14 +5080,14 @@ def tab_rebalance() -> None:
                                 key="reb1_mode")
                 is_active   = mode.startswith("Activo")
                 new_capital = st.number_input("Capital adicional ($USD):", min_value=0.0,
-                                              value=0.0, step=100.0, key="reb1_cap")
+                                              step=100.0, key="reb1_cap")
                 commission  = st.number_input("Comisión por trade ($):", min_value=0.0,
-                                              value=0.0, step=0.5, key="reb1_comm")
+                                              step=0.5, key="reb1_comm")
                 min_trade   = st.number_input("Monto mínimo op. ($):", min_value=1.0,
-                                              value=10.0, key="reb1_min")
+                                              key="reb1_min")
                 drift_thr   = st.slider(
                     "Umbral de drift (no operar si drift < X%):",
-                    min_value=0, max_value=15, value=0, step=1, key="reb1_drift",
+                    min_value=0, max_value=15, step=1, key="reb1_drift",
                     help="Si una posición tiene un drift menor a este porcentaje, "
                          "se deja sin cambio. Útil para evitar trades pequeños innecesarios. "
                          "Ej: 3% → solo opera si la posición está desviada más de 3 puntos.",
@@ -4714,7 +5101,7 @@ def tab_rebalance() -> None:
                         unsafe_allow_html=True)
                 st.divider()
                 run1 = st.button("⚖️ Calcular Rebalanceo", type="primary",
-                                 use_container_width=True, key="run_reb1")
+                                 width="stretch", key="run_reb1")
 
             with col_res:
                 if run1 or "reb1_result" in st.session_state:
@@ -4733,7 +5120,7 @@ def tab_rebalance() -> None:
 
                     _render_rebalance_result(
                         st.session_state["reb1_result"],
-                        new_capital=new_capital,
+                        new_capital=new_capital, key_prefix="reb1",
                     )
                 else:
                     st.info("Configura parámetros y presiona **Calcular Rebalanceo**.")
@@ -4753,20 +5140,26 @@ def tab_rebalance() -> None:
                 help="MaxSharpe: max Sharpe | MinVar: min volatilidad | MaxReturn: max retorno | ERC: riesgo igualado",
                 key="opt_strategy",
             )
-            max_w    = st.slider("Peso máx. por activo (%):", 5, 50, 25, key="opt_maxw") / 100
+            max_w    = st.slider("Peso máx. por activo (%):", min_value=5, max_value=50, key="opt_maxw") / 100
             mode2    = st.radio("Modo ejecución:", ["Activo (compra + venta)", "Pasivo (solo comprar)"],
                                 key="reb2_mode")
             is_active2   = mode2.startswith("Activo")
             new_capital2 = st.number_input("Capital adicional ($USD):", min_value=0.0,
-                                           value=0.0, step=100.0, key="reb2_cap")
+                                           step=100.0, key="reb2_cap")
             commission2  = st.number_input("Comisión por trade ($):", min_value=0.0,
-                                           value=0.0, step=0.5, key="reb2_comm")
+                                           step=0.5, key="reb2_comm")
             min_trade2   = st.number_input("Monto mínimo op. ($):", min_value=1.0,
-                                           value=10.0, key="reb2_min")
+                                           key="reb2_min")
 
             st.divider()
             st.markdown("**Activos a optimizar:**")
             tickers_held  = hdf["Ticker"].unique().tolist()
+            # Tickers enviados desde "Sugerencias" o "Descubrimiento"
+            _pend = st.session_state.pop("_pending_opt_extra", None)
+            if _pend:
+                _cur = [t.strip().upper() for t in st.session_state.get("opt_extra", "").split(",")
+                        if t.strip()]
+                st.session_state["opt_extra"] = ", ".join(dict.fromkeys(_cur + list(_pend)))
             extra_raw2 = st.text_input("Agregar activos al universo (coma):",
                                        placeholder="NVDA, META, GLD", key="opt_extra")
             extra2 = [t.strip().upper() for t in extra_raw2.split(",") if t.strip()]
@@ -4780,10 +5173,11 @@ def tab_rebalance() -> None:
             st.divider()
 
             # ── FIX: Locked tickers — keep current weight, no sell ─
+            st.session_state["opt_locked"] = [
+                t for t in st.session_state.get("opt_locked", []) if t in opt_universe]
             locked2 = st.multiselect(
                 "🔒 Proteger de ventas:",
                 options=opt_universe,
-                default=[],
                 key="opt_locked",
                 help="El optimizador no venderá NADA de estos activos. "
                      "Se mantiene exactamente el peso actual.",
@@ -4879,18 +5273,18 @@ def tab_rebalance() -> None:
 
             st.divider()
             run2 = st.button("🧠 Optimizar & Rebalancear", type="primary",
-                             use_container_width=True, key="run_opt")
+                             width="stretch", key="run_opt")
 
         with col_res2:
             if run2 or "reb2_result" in st.session_state:
                 if run2:
                     # Clear stale optimization results
-                    for _k in ["opt_stats","opt_frontier","opt_weights_generated",
+                    for _k in ["opt_stats","opt_frontier","opt_weights_generated","opt_cov",
                                "opt_valid_t","opt_mu","opt_vol_assets","reb2_result",
                                "ai_rebalance_explanation","opt_tech_report"]:
                         st.session_state.pop(_k, None)
                     tech_filter_report = []   # se sobreescribe si el filtro está activo
-                    end_h   = datetime.today()
+                    end_h   = _today_dt()
                     start_h = end_h - timedelta(days=365 * 3)
                     with st.spinner("Descargando historial (3 años)..."):
                         hist = fetch_history(
@@ -4909,7 +5303,7 @@ def tab_rebalance() -> None:
                         tech_filter_report = []   # para mostrar qué se excluyó
                         if use_tech_filter and valid_tickers:
                             with st.spinner("Calculando señales técnicas del universo…"):
-                                end_tech   = datetime.today()
+                                end_tech   = _today_dt()
                                 start_tech = end_tech - timedelta(days=180)
                                 tech_scores_df = analyze_candidates(
                                     valid_tickers,
@@ -5017,16 +5411,19 @@ def tab_rebalance() -> None:
                                 val = float(r["Shares"]) * prices_now.get(t_,{}).get("price",0)
                                 curr_w_now[t_] = val / nav_now if nav_now > 0 else 0
 
-                            adjusted = dict(opt_weights)
-                            for t_ in locked2:
-                                if t_ in adjusted and t_ in curr_w_now:
-                                    # Never go below current weight for locked tickers
-                                    adjusted[t_] = max(adjusted[t_], curr_w_now.get(t_, 0))
-
-                            # Re-normalise so weights still sum to 1
-                            total_adj = sum(adjusted.values())
-                            if total_adj > 0:
-                                opt_weights = {k: v/total_adj for k, v in adjusted.items()}
+                            # Los protegidos quedan fijos en ≥ su peso actual; SOLO los demás
+                            # se re-escalan para que todo sume 100% (antes se re-escalaba
+                            # todo y el protegido terminaba debajo de su peso → se vendía).
+                            locked_w = {t_: max(opt_weights.get(t_, 0.0), curr_w_now.get(t_, 0.0))
+                                        for t_ in locked2 if t_ in opt_weights}
+                            L = sum(locked_w.values())
+                            if L >= 1.0:
+                                opt_weights = {t_: (locked_w.get(t_, 0.0) / L) for t_ in opt_weights}
+                            else:
+                                free = {t_: w_ for t_, w_ in opt_weights.items() if t_ not in locked_w}
+                                F = sum(free.values())
+                                scale = (1.0 - L) / F if F > 0 else 0.0
+                                opt_weights = {**{t_: w_ * scale for t_, w_ in free.items()}, **locked_w}
 
                         st.session_state["opt_weights_generated"] = opt_weights
                         st.session_state["opt_strategy_used"]     = strategy
@@ -5034,7 +5431,8 @@ def tab_rebalance() -> None:
                         st.session_state["opt_tech_report"]       = tech_filter_report
 
                         mu_arr  = _robust_mu(ret_df, valid_tickers)
-                        cov_arr = ret_df[valid_tickers].cov().values * TRADING_DAYS
+                        cov_arr = _robust_cov(ret_df, valid_tickers)
+                        st.session_state["opt_cov"] = cov_arr
                         w_arr   = np.array([opt_weights.get(t, 0) for t in valid_tickers])
                         opt_ret, opt_vol, opt_sharpe = _portfolio_stats(w_arr, mu_arr, cov_arr, rf_rate)
 
@@ -5148,7 +5546,7 @@ def tab_rebalance() -> None:
                             legend=dict(bgcolor="rgba(0,0,0,0)"),
                             hovermode="closest",
                         )
-                        st.plotly_chart(fig_ef, use_container_width=True, config=PLOTLY_CONFIG)
+                        st.plotly_chart(fig_ef, width="stretch", config=PLOTLY_CONFIG)
 
                     # SmartCluster visualization
                     if strat_used == "SmartCluster" and "smart_cluster_labels" in st.session_state:
@@ -5181,29 +5579,32 @@ def tab_rebalance() -> None:
                             legend=dict(bgcolor="rgba(0,0,0,0)"),
                             hovermode="closest",
                         )
-                        st.plotly_chart(fig_sc, use_container_width=True, config=PLOTLY_CONFIG)
+                        st.plotly_chart(fig_sc, width="stretch", config=PLOTLY_CONFIG)
 
                     # Pesos generados
                     opt_w = st.session_state.get("opt_weights_generated", {})
                     if opt_w:
                         st.markdown("<br>", unsafe_allow_html=True)
                         section("PESOS ÓPTIMOS CALCULADOS")
+                        _held_now = set(hdf["Ticker"].tolist())
                         df_ow = pd.DataFrame([
-                            {"Ticker": t, "Peso Óptimo": w,
+                            {"Ticker": t, "Peso Óptimo": w * 100,
                              "Estado": "🔒 Protegido" if t in st.session_state.get("opt_locked2",[])
-                                       else ("✅ Mantener" if w > 0.005 else "⬇️ Liquidar")}
+                                       else ("✅ Mantener" if w > 0.005 and t in _held_now
+                                             else "🆕 Nuevo" if w > 0.005
+                                             else "⬇️ Liquidar")}
                             for t, w in sorted(opt_w.items(), key=lambda x: -x[1])
-                            if w > 0.001
+                            if w > 0.001 or t in _held_now
                         ])
                         st.dataframe(
                             df_ow,
                             column_config={
                                 "Ticker": st.column_config.TextColumn("Ticker", width="small"),
                                 "Peso Óptimo": st.column_config.ProgressColumn(
-                                    "Peso", format="%.1f%%", min_value=0, max_value=1),
+                                    "Peso", format="%.1f%%", min_value=0, max_value=100),
                                 "Estado": st.column_config.TextColumn("Estado"),
                             },
-                            hide_index=True, use_container_width=True,
+                            hide_index=True, width="stretch",
                         )
                         if st.button("💾 Usar como Target Weights", key="adopt_opt_weights"):
                             st.session_state["target_weights"] = {
@@ -5215,7 +5616,7 @@ def tab_rebalance() -> None:
                         section("PLAN DE TRANSICIÓN")
                         _render_rebalance_result(
                             st.session_state["reb2_result"],
-                            new_capital=new_capital2,
+                            new_capital=new_capital2, key_prefix="reb2",
                         )
 
                     # ── Explicación ────────────────────────────
@@ -5248,7 +5649,13 @@ def tab_rebalance() -> None:
                             if valid_t:
                                 mu_arr2  = np.array([mu_d.get(t,0) for t in valid_t])
                                 vol_arr2 = np.array([vol_d.get(t,0) for t in valid_t])
-                                cov_approx = np.diag(vol_arr2**2)
+                                # Covarianza REAL (antes: solo la diagonal → todas las
+                                # correlaciones salían 0 y la explicación decía
+                                # "diversificador" para cualquier activo)
+                                _cov_saved = st.session_state.get("opt_cov")
+                                cov_approx = (_cov_saved if _cov_saved is not None
+                                              and len(_cov_saved) == len(valid_t)
+                                              else np.diag(vol_arr2**2))
                                 explanation = _build_rebalance_explanation(
                                     valid_tickers  = valid_t,
                                     opt_weights    = opt_w2,
@@ -5277,7 +5684,7 @@ def tab_rebalance() -> None:
                                             locked=locked2, min_assets=min_assets2,
                                         )
                                         st.session_state[ai_reb_key] = _call_claude(p, max_tokens=800)
-                                st.markdown(st.session_state[ai_reb_key])
+                                st.markdown(st.session_state[ai_reb_key].replace("$", "\\$"))
                                 if st.button("🔄 Regenerar", key="regen_reb", type="secondary"):
                                     del st.session_state[ai_reb_key]; st.rerun()
                             else:
@@ -5332,12 +5739,12 @@ def tab_rebalance() -> None:
                                         key="sw_days", format_func=lambda d: f"{d} días")
 
             run_sw = st.button("🔍 Analizar & Generar Swaps", type="primary",
-                               use_container_width=True, key="run_sw")
+                               width="stretch", key="run_sw")
 
         with col_s2:
             if run_sw or "sw_result" in st.session_state:
                 if run_sw:
-                    end_sw   = datetime.today()
+                    end_sw   = _today_dt()
                     start_sw = end_sw - timedelta(days=period_days2)
 
                     # Analizar posiciones actuales
@@ -5370,7 +5777,7 @@ def tab_rebalance() -> None:
                     if not pool_raw2:
                         import random as _rnd2
                         _avail2 = [t for t in UNIVERSE if t not in tickers_now]
-                        _seed2  = int(datetime.today().strftime("%Y%m%d"))
+                        _seed2  = int(_today_dt().strftime("%Y%m%d"))
                         _rng2   = _rnd2.Random(_seed2)
                         _rng2.shuffle(_avail2)
                         pool_raw2 = _avail2[:n_candidates * 6]   # pool amplio
@@ -5424,6 +5831,7 @@ def tab_rebalance() -> None:
                 section("ESTADO DE TUS POSICIONES")
                 if not curr_scores.empty:
                     df_curr = curr_scores.copy()
+                    df_curr["Mom 3M"] = pd.to_numeric(df_curr["Mom 3M"], errors="coerce") * 100
                     df_curr["Score"] = df_curr["_score"].round(0).astype(int) if "_score" in df_curr.columns else 50
                     df_curr["Estado"] = df_curr.apply(lambda r: (
                         "🔒 Protegida" if r.name in res.get("sw_locked",[])
@@ -5447,7 +5855,7 @@ def tab_rebalance() -> None:
                             "Mom 3M":      st.column_config.NumberColumn("Mom 3M", format="%.1f%%"),
                             "Ret. Período":st.column_config.NumberColumn("Ret. %", format="%.1f%%"),
                         },
-                        hide_index=True, use_container_width=True,
+                        hide_index=True, width="stretch",
                     )
 
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -5572,19 +5980,19 @@ def tab_rebalance() -> None:
                             _bc1, _bc2, _bc3 = st.columns([2, 1, 1])
                             with _bc2:
                                 if st.button("✅ Aceptar", key=f"sw_accept_{i}",
-                                             type="primary", use_container_width=True):
+                                             type="primary", width="stretch"):
                                     st.session_state.setdefault("sw_decisions", {})[i] = True
                                     st.rerun()
                             with _bc3:
                                 if st.button("❌ Rechazar", key=f"sw_reject_{i}",
-                                             use_container_width=True):
+                                             width="stretch"):
                                     st.session_state.setdefault("sw_decisions", {})[i] = False
                                     st.rerun()
                         else:
                             _, _bundo = st.columns([5, 1])
                             with _bundo:
                                 if st.button("↩️ Deshacer", key=f"sw_undo_{i}",
-                                             use_container_width=True):
+                                             width="stretch"):
                                     st.session_state["sw_decisions"].pop(i, None)
                                     st.rerun()
                         st.markdown("<div style='margin-bottom:4px;'></div>",
@@ -5596,6 +6004,7 @@ def tab_rebalance() -> None:
                             disp_cand = top_buys[["_score","Señal","Tech Score",
                                                    "Fund. Score","RSI","Mom 3M","Ret. Período"]].copy()
                             disp_cand = disp_cand.rename(columns={"_score":"Score"})
+                            disp_cand["Mom 3M"] = pd.to_numeric(disp_cand["Mom 3M"], errors="coerce") * 100
                             st.dataframe(
                                 disp_cand.reset_index(),
                                 column_config={
@@ -5609,7 +6018,7 @@ def tab_rebalance() -> None:
                                     "Mom 3M":      st.column_config.NumberColumn("Mom 3M", format="%.1f%%"),
                                     "Ret. Período":st.column_config.NumberColumn("Ret. %", format="%.1f%%"),
                                 },
-                                hide_index=True, use_container_width=True,
+                                hide_index=True, width="stretch",
                             )
 
                     # ── Resumen y acción sobre swaps aceptados ─
@@ -5649,18 +6058,13 @@ def tab_rebalance() -> None:
                                 "el peso óptimo de cada uno.")
                             st.code(", ".join(accepted_buys), language=None)
                             if st.button("➕ Agregar aceptados al universo de optimización",
-                                         type="primary", use_container_width=True,
+                                         type="primary", width="stretch",
                                          key="sw_to_opt"):
-                                existing = st.session_state.get("_sw_extras", "")
-                                combined = list(dict.fromkeys(
-                                    [t.strip() for t in existing.split(",") if t.strip()]
-                                    + accepted_buys
-                                ))
-                                st.session_state["_sw_extras"] = ", ".join(combined)
-                                st.success(
-                                    f"✅ {', '.join(accepted_buys)} añadidos. "
-                                    "Ve al sub-tab **🧠 Optimización** y verás estos tickers "
-                                    "en el campo 'Agregar activos al universo'.")
+                                st.session_state["_pending_opt_extra"] = list(accepted_buys)
+                                st.session_state["_flash"] = (
+                                    f"✅ {', '.join(accepted_buys)} añadidos al universo de "
+                                    "🧠 Optimización de Estrategia.")
+                                st.rerun()
             else:
                 st.info("Configura los parámetros y presiona **Analizar & Generar Swaps**.")
 
@@ -5672,7 +6076,8 @@ def tab_rebalance() -> None:
 # HELPER: Render rebalance result (shared by sub-tabs 1 y 2)
 # ─────────────────────────────────────────────────────────────
 
-def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
+def _render_rebalance_result(result: dict, new_capital: float = 0.0,
+                             key_prefix: str = "reb") -> None:
     if not result.get("ok"):
         st.error(result.get("error", "Error desconocido."))
         return
@@ -5837,13 +6242,54 @@ def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
                     "Precio":  st.column_config.NumberColumn(format="$%.2f"),
                     "Razón":   st.column_config.TextColumn("Por qué"),
                 },
-                hide_index=True, use_container_width=True,
+                hide_index=True, width="stretch",
             )
             st.caption("💡 En GBM: usa la columna **Monto USD** — ingresa ese valor en el campo de monto en dólares.")
             csv = exec_df.to_csv(index=False)
             st.download_button("⬇️ Descargar plan (.csv)", data=csv,
                                file_name=f"rebalanceo_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                               mime="text/csv")
+                               mime="text/csv", key=f"{key_prefix}_dl_plan")
+
+        # ── Registrar en el log lo que se ejecutó en el broker ────────
+        with st.popover("✅ Ya ejecuté estas órdenes — registrarlas en mi log", width="stretch"):
+            st.caption("Se agregan como compras/ventas. Corrige títulos o precio si tu broker "
+                       "ejecutó distinto; pon 0 títulos para omitir una orden.")
+            held = holdings_df().set_index("Ticker")["Shares"].to_dict()
+            reg_df = pd.DataFrame([{
+                "Ticker":  t["Ticker"],
+                "Tipo":    t["Acción"],
+                "Títulos": round(min(abs(t.get("Acciones", 0)), held.get(t["Ticker"], 0.0))
+                                 if t["Acción"] == "SELL" else abs(t.get("Acciones", 0)), 6),
+                "Precio":  round(float(t["Precio"]), 4),
+            } for t in all_active])
+            reg_edit = st.data_editor(
+                reg_df, hide_index=True, width="stretch", key=f"{key_prefix}_reg_ed",
+                disabled=["Ticker", "Tipo"],
+                column_config={
+                    "Títulos": st.column_config.NumberColumn(format="%.6f", min_value=0),
+                    "Precio":  st.column_config.NumberColumn(format="$%.4f", min_value=0),
+                },
+            )
+            reg_date = st.date_input("Fecha de ejecución:", value=_today_mx(),
+                                     key=f"{key_prefix}_reg_dt")
+            valid_rows = reg_edit[(reg_edit["Títulos"] > 0) & (reg_edit["Precio"] > 0)]
+            if st.button(f"Registrar {len(valid_rows)} operación(es)", type="primary",
+                         key=f"{key_prefix}_reg_btn", disabled=valid_rows.empty):
+                _push_undo("registrar rebalanceo")
+                new_rows = [{
+                    "Ticker": r["Ticker"], "Type": r["Tipo"],
+                    "Shares": float(min(r["Títulos"], held.get(r["Ticker"], 0.0))
+                                    if r["Tipo"] == "SELL" else r["Títulos"]),
+                    "Price": float(r["Precio"]), "Date": str(reg_date),
+                    "Notes": "Rebalanceo ejecutado",
+                } for _, r in valid_rows.iterrows()]
+                st.session_state["transactions"] = (
+                    list(st.session_state.get("transactions", [])) + new_rows)
+                for _k in ("reb1_result", "reb2_result"):
+                    st.session_state.pop(_k, None)
+                st.session_state["_flash"] = (f"✅ {len(new_rows)} operaciones registradas. "
+                                              "Puedes deshacerlo en Portfolio → Log.")
+                st.rerun()
 
     # ── Sin cambio ────────────────────────────────────────────────────
     if holds:
@@ -5885,7 +6331,7 @@ def _render_rebalance_result(result: dict, new_capital: float = 0.0) -> None:
         "legend": dict(orientation="h", y=1.05, x=0),
     })
     fig_ba.update_layout(**_ba_layout)
-    st.plotly_chart(fig_ba, use_container_width=True, config=PLOTLY_CONFIG)
+    st.plotly_chart(fig_ba, width="stretch", config=PLOTLY_CONFIG)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -6001,16 +6447,7 @@ def fetch_deep_analysis(ticker: str) -> dict:
 
         # ── Noticias ─────────────────────────────────────────
         try:
-            news_raw = tk.news or []
-            out["news"] = [
-                {
-                    "title":     n.get("title", ""),
-                    "publisher": n.get("publisher", ""),
-                    "link":      n.get("link", ""),
-                    "age":       _news_age(n.get("providerPublishTime", 0)),
-                }
-                for n in news_raw[:5]
-            ]
+            out["news"] = _parse_news(tk.news or [], 5)
         except Exception:
             pass
 
@@ -6136,8 +6573,8 @@ def _score_analyst(d: dict) -> int:
         if   up > 0.30:  s += 20
         elif up > 0.15:  s += 12
         elif up > 0.05:  s +=  5
-        elif up < -0.05: s -= 10
         elif up < -0.15: s -= 18
+        elif up < -0.05: s -= 10
     # Consenso buy/hold/sell
     total = d["buy"] + d["hold"] + d["sell"]
     if total > 0:
@@ -6238,7 +6675,7 @@ def _render_candidate_card(d: dict, idx: int) -> None:
           <div style="font-size:1.3rem; font-weight:700; color:#fff;
                       font-family:'DM Mono',monospace;">${d['price']:,.2f}</div>
           <div style="font-size:0.85rem; color:{chg_color}; font-family:'DM Mono',monospace;">
-            {chg_sign} {abs(d['change_1d']):.2%} hoy
+            {chg_sign} {abs(d['change_1d']):.2%} {price_day_label().lower()}
           </div>
         </div>
       </div>
@@ -6292,7 +6729,7 @@ def _render_candidate_card(d: dict, idx: int) -> None:
                 ("EV/EBITDA",     d["ev_ebitda"],    "{:.1f}"),
                 ("P/Book",        d["pb"],            "{:.2f}"),
                 ("ROE",           d["roe"],           "{:.1%}" if d["roe"] else "{:.2f}"),
-                ("Margen Neto",   d["profit_margin"],"{ :.1%}" if d["profit_margin"] else "{:.2f}"),
+                ("Margen Neto",   d["profit_margin"],"{:.1%}" if d["profit_margin"] else "{:.2f}"),
                 ("Crec. Ingresos",d["rev_growth"],   "{:.1%}" if d["rev_growth"] else "{:.2f}"),
                 ("Deuda/Capital", d["debt_equity"],  "{:.1f}"),
                 ("EBITDA",        None, ""),
@@ -6413,7 +6850,7 @@ def _render_discovery_tab() -> None:
         st.caption(f"Histórico: {w_hist}% (calculado automáticamente)")
 
         run_disc = st.button("🔍 Analizar candidatos", type="primary",
-                             use_container_width=True, key="run_disc")
+                             width="stretch", key="run_disc")
 
     with col_res:
         if run_disc or "disc_results" in st.session_state:
@@ -6426,7 +6863,7 @@ def _render_discovery_tab() -> None:
                     import random as _rnd
                     _available = [t for t in UNIVERSE if t not in excl]
                     # Semilla diaria: mismo resultado durante el día, varía cada día
-                    _seed = int(datetime.today().strftime("%Y%m%d"))
+                    _seed = int(_today_dt().strftime("%Y%m%d"))
                     _rng  = _rnd.Random(_seed)
                     _rng.shuffle(_available)
                     raw = _available[:n_show * 8]   # pool amplio para que haya variedad
@@ -6487,12 +6924,12 @@ def _render_discovery_tab() -> None:
                 "Analistas": d["score_analyst"],
                 "Histór.":   d["score_hist"],
                 "Recom.":    (d.get("analyst_key") or "—").replace("_"," ").upper(),
-                "Upside":    d["upside"],
+                "Upside":    d["upside"] * 100 if d["upside"] is not None else None,
                 "Ret. 1A":   d["ret_1y"],
                 "Sharpe 1A": d["sharpe_1y"],
                 "P/E":       d["pe"],
                 "EV/EBITDA": d["ev_ebitda"],
-                "ROE":       d["roe"],
+                "ROE":       d["roe"] * 100 if d["roe"] is not None else None,
             } for d in results])
 
             st.dataframe(
@@ -6511,9 +6948,9 @@ def _render_discovery_tab() -> None:
                     "Sharpe 1A": st.column_config.NumberColumn("Sharpe", format="%.2f"),
                     "P/E":       st.column_config.NumberColumn("P/E",    format="%.1f"),
                     "EV/EBITDA": st.column_config.NumberColumn("EV/EBITDA", format="%.1f"),
-                    "ROE":       st.column_config.NumberColumn("ROE",    format="%.1%"),
+                    "ROE":       st.column_config.NumberColumn("ROE",    format="%.1f%%"),
                 },
-                hide_index=True, use_container_width=True,
+                hide_index=True, width="stretch",
             )
 
             st.markdown("<br>", unsafe_allow_html=True)
@@ -6534,7 +6971,7 @@ def _render_discovery_tab() -> None:
                 btn_label = f"✅ Seleccionado — {d['ticker']}" if is_sel else f"➕ Seleccionar {d['ticker']}"
                 btn_type  = "primary" if is_sel else "secondary"
                 if st.button(btn_label, key=f"sel_{d['ticker']}_{i}",
-                             use_container_width=True, type=btn_type):
+                             width="stretch", type=btn_type):
                     if is_sel:
                         sel_set.discard(d["ticker"])
                     else:
@@ -6571,20 +7008,16 @@ def _render_discovery_tab() -> None:
                 cc1, cc2 = st.columns(2)
                 with cc1:
                     if st.button("🧠 Llevar a Optimización (Sub-tab 2)",
-                                 type="primary", use_container_width=True,
+                                 type="primary", width="stretch",
                                  key="disc_to_opt"):
-                        # Pre-cargar el campo de texto del sub-tab 2
-                        st.session_state["disc_opt_extra"] = ", ".join(sorted(sel_set))
-                        st.success(
-                            f"Activos copiados. Ve al sub-tab **🧠 Optimización de Estrategia** "
-                            f"y pégalos en el campo 'Agregar activos al universo':\n\n"
-                            f"`{', '.join(sorted(sel_set))}`"
-                        )
-                        # Mostrar el texto a copiar con st.code para facilidad
-                        st.code(", ".join(sorted(sel_set)), language=None)
+                        st.session_state["_pending_opt_extra"] = sorted(sel_set)
+                        st.session_state["_flash"] = (
+                            f"✅ {', '.join(sorted(sel_set))} añadidos al universo de "
+                            "🧠 Optimización de Estrategia.")
+                        st.rerun()
                 with cc2:
                     if st.button("🗑️ Limpiar selección", type="secondary",
-                                 use_container_width=True, key="disc_clear"):
+                                 width="stretch", key="disc_clear"):
                         st.session_state["discovery_selected"] = set()
                         st.rerun()
         else:
@@ -6623,7 +7056,7 @@ def tab_performance() -> None:
         except Exception:
             first_txn_date = None
 
-    end_dt   = datetime.today()
+    end_dt   = _today_dt()
     default_start = first_txn_date if first_txn_date else (end_dt - timedelta(days=365)).date()
 
     # ── Restore saved custom date if available ───────────────
@@ -6652,7 +7085,7 @@ def tab_performance() -> None:
         extra_benches = [t.strip().upper() for t in extra_bench_raw.split(",") if t.strip()]
     with col_info:
         if first_txn_date:
-            days_since = (date.today() - first_txn_date).days
+            days_since = (_today_mx() - first_txn_date).days
             st.markdown(
                 f"<div style='font-family:var(--mono);font-size:0.82rem;color:#aeaeb2;padding-top:28px;'>"
                 f"Primera compra: <b style='color:#ffffff'>{first_txn_date}</b>"
@@ -6666,11 +7099,11 @@ def tab_performance() -> None:
             custom_start = st.date_input(
                 "Desde:", value=_saved_custom or default_start, key="perf_start")
         with col_d2:
-            custom_end = st.date_input("Hasta:", value=date.today(), key="perf_end")
+            custom_end = st.date_input("Hasta:", value=_today_mx(), key="perf_end")
         with col_d3:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("💾 Guardar fecha como predeterminada",
-                         use_container_width=True, key="save_perf_date",
+                         width="stretch", key="save_perf_date",
                          help="Guarda esta fecha de inicio para este portafolio"):
                 st.session_state["perf_custom_start"] = str(custom_start)
                 st.session_state["perf_use_custom"]   = True
@@ -6682,6 +7115,11 @@ def tab_performance() -> None:
         # Clear saved custom if user switches to "desde primera compra"
         if _use_custom:
             st.session_state["perf_use_custom"] = False
+
+    currency = st.segmented_control(
+        "Moneda de los rendimientos:", ["USD", "MXN"], default="USD", key="perf_ccy",
+        help="MXN = lo que ganaste medido en pesos: incluye la variación del tipo de cambio.",
+    ) or "USD"
 
     extra_benches = [t.strip().upper() for t in
                      st.session_state.get("extra_bench_input", "").split(",") if t.strip()]
@@ -6736,8 +7174,60 @@ def tab_performance() -> None:
     port_returns  = twr_aligned.pct_change().dropna()
     bench_returns = bench_series.pct_change().dropna() if not bench_series.empty else pd.Series(dtype=float)
 
+    # ── Vista en pesos: (1 + r_USD)·(1 + r_tipo_de_cambio) − 1 ──
+    fx_series = pd.Series(dtype=float)
+    if currency == "MXN":
+        _fx_df = fetch_history(["USDMXN=X"], start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"))
+        if not _fx_df.empty:
+            fx_series = _fx_df.iloc[:, 0].dropna()
+        if fx_series.empty:
+            st.warning("No se pudo descargar el tipo de cambio; se muestran los rendimientos en USD.")
+            currency = "USD"
+    if currency == "MXN":
+        _fx_r = fx_series.pct_change()
+
+        def _to_mxn(r: pd.Series) -> pd.Series:
+            return (1 + r) * (1 + _fx_r.reindex(r.index).fillna(0)) - 1
+
+        port_returns  = _to_mxn(port_returns)
+        bench_returns = _to_mxn(bench_returns)
+        twr_aligned   = pd.concat([pd.Series([100.0], index=twr_aligned.index[:1]),
+                                   100 * (1 + port_returns).cumprod()])
+        _fx_on_eq     = fx_series.reindex(equity.index).ffill().bfill()
+        eq_norm       = (equity * _fx_on_eq) / float(equity.iloc[0] * _fx_on_eq.iloc[0]) * 100
+        if not bench_norm.empty:
+            bench_norm = bench_norm * _fx_on_eq / float(_fx_on_eq.iloc[0])
+        st.caption(f"💱 Rendimientos en **pesos**: USD/MXN pasó de "
+                   f"{float(_fx_on_eq.iloc[0]):.2f} a {float(_fx_on_eq.iloc[-1]):.2f} en el período.")
+
     port_metrics  = compute_performance_metrics(port_returns, rf_rate)
     bench_metrics = compute_performance_metrics(bench_returns, rf_rate) if not bench_returns.empty else {}
+
+    # ── Tu dinero: cuánto pusiste, cuánto ganaste ─────────────
+    section("TU DINERO")
+    _live_now = fetch_live_prices(tuple(sorted(hdf["Ticker"].tolist())))
+    _nav_now  = sum(float(r["Shares"]) * _live_now.get(r["Ticker"], {}).get("price", 0)
+                    for _, r in hdf.iterrows())
+    _ms = compute_money_summary(txns, _nav_now)
+    _fx_now = get_usd_mxn() if currency == "MXN" else 1.0
+    _cur = "MXN " if currency == "MXN" else ""
+    mk1, mk2, mk3, mk4, mk5 = st.columns(5)
+    with mk1: kpi_card("Aportado neto", f"{_cur}${_ms['net_contrib'] * _fx_now:,.0f}",
+                       f"compras ${_ms['buys']:,.0f} − ventas ${_ms['sells']:,.0f}")
+    with mk2: kpi_card("Valor actual", f"{_cur}${_nav_now * _fx_now:,.0f}")
+    with mk3: kpi_card("Ganancia total", f"{_cur}${_ms['gain'] * _fx_now:+,.0f}",
+                       "incluye ventas y dividendos",
+                       accent="#30d158" if _ms["gain"] >= 0 else "#ff453a")
+    with mk4: kpi_card("Dividendos cobrados", f"{_cur}${_ms['dividends'] * _fx_now:,.2f}",
+                       "regístralos como Dividendo")
+    with mk5:
+        _x = _ms["xirr"]
+        kpi_card("XIRR (anual)", f"{_x:+.1%}" if _x is not None else "—",
+                 "ponderado por dinero · USD",
+                 accent=("#30d158" if (_x or 0) >= 0 else "#ff453a") if _x is not None else "")
+    st.caption("**TWR** (abajo) mide la habilidad de inversión sin importar cuándo aportaste. "
+               "**XIRR** mide el rendimiento real de TU dinero: pesa más los periodos en que "
+               "tenías más capital invertido.")
 
     # ── KPIs comparativos ─────────────────────────────────────
     section("MÉTRICAS COMPARATIVAS")
@@ -6833,6 +7323,8 @@ def tab_performance() -> None:
             if not _eb_s.empty:
                 _eb_aligned = _eb_s.reindex(equity.index).ffill().bfill()
                 _eb_norm    = _eb_aligned / _eb_aligned.iloc[0] * 100
+                if currency == "MXN":
+                    _eb_norm = _eb_norm * _fx_on_eq / float(_fx_on_eq.iloc[0])
                 fig_perf.add_trace(go.Scatter(
                     x=_eb_norm.index, y=_eb_norm.values, name=_eb,
                     line=dict(color=_extra_colors[_ei % len(_extra_colors)],
@@ -6855,7 +7347,7 @@ def tab_performance() -> None:
         ),
     }
     fig_perf.update_layout(**perf_layout, yaxis_title="Valor (Base 100)", height=420)
-    st.plotly_chart(fig_perf, use_container_width=True, config=PLOTLY_CONFIG)
+    st.plotly_chart(fig_perf, width="stretch", config=PLOTLY_CONFIG)
 
     # ── Drawdown ──────────────────────────────────────────────
     section("UNDERWATER — CAÍDAS DESDE MÁXIMOS")
@@ -6922,7 +7414,7 @@ def tab_performance() -> None:
                         ticksuffix="%",
                         showgrid=True, gridcolor="rgba(255,255,255,0.05)")
     fig_dd.update_xaxes(showgrid=False)
-    st.plotly_chart(fig_dd, use_container_width=True, config=PLOTLY_CONFIG)
+    st.plotly_chart(fig_dd, width="stretch", config=PLOTLY_CONFIG)
 
     # Stats row
     _in_dd = curr_dd_val < -0.5
@@ -6964,25 +7456,13 @@ def tab_performance() -> None:
             "Métrica":    label,
             "Portafolio": f"{pv:{fmt}}",
             bench:        f"{bv:{fmt}}",
-            "Diferencia": diff,
-            "_pv":        pv,
-            "_bv":        bv,
+            "Diferencia": f"{diff:+{fmt}}",
         })
     if ann_est_port:
-        rows_note = [{"Métrica": f"* Proyección basada en {n_days_port} días (<1 año)",
-                      "Portafolio": "", bench: "", "Diferencia": float("nan"),
-                      "_pv": 0, "_bv": 0}]
-        rows += rows_note
+        rows.append({"Métrica": f"* Proyección basada en {n_days_port} días (<1 año)",
+                     "Portafolio": "", bench: "", "Diferencia": ""})
 
-    df_metrics = pd.DataFrame(rows)
-    st.dataframe(
-        df_metrics.drop(columns=["_pv", "_bv"]),
-        column_config={
-            "Diferencia": st.column_config.NumberColumn("Diferencia", format="%+.2f"),
-        },
-        hide_index=True,
-        use_container_width=True,
-    )
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     # ── Retornos mensuales (heatmap) ──────────────────────────
     section("HEATMAP DE RETORNOS MENSUALES")
@@ -7009,7 +7489,7 @@ def tab_performance() -> None:
             height=max(200, len(pivot) * 45 + 80),
             coloraxis_showscale=False,
         )
-        st.plotly_chart(fig_heat, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(fig_heat, width="stretch", config=PLOTLY_CONFIG)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -7027,11 +7507,11 @@ def tab_analytics() -> None:
 
     col_c, _ = st.columns([1, 3])
     with col_c:
-        n_years = st.selectbox("Período:", [1, 2, 3, 5], index=1,
+        n_years = st.selectbox("Período:", [1, 2, 3, 5],
                                format_func=lambda y: f"{y} año{'s' if y > 1 else ''}",
                                key="analytics_years")
 
-    end_dt   = datetime.today()
+    end_dt   = _today_dt()
     start_dt = end_dt - timedelta(days=365 * n_years)
 
     with st.spinner("Descargando histórico..."):
@@ -7068,12 +7548,12 @@ def tab_analytics() -> None:
 
         rows.append({
             "Ticker":        t,
-            "Ret. Anual":    m.get("Retorno Anualizado", 0),
-            "Volatilidad":   m.get("Volatilidad Anual", 0),
+            "Ret. Anual":    m.get("Retorno Anualizado", 0) * 100,
+            "Volatilidad":   m.get("Volatilidad Anual", 0) * 100,
             "Sharpe":        m.get("Sharpe Ratio", 0),
-            "Max DD":        m.get("Max Drawdown", 0),
+            "Max DD":        m.get("Max Drawdown", 0) * 100,
             "Beta":          beta,
-            "Win Rate":      m.get("Win Rate", 0),
+            "Win Rate":      m.get("Win Rate", 0) * 100,
         })
 
     if rows:
@@ -7090,7 +7570,7 @@ def tab_analytics() -> None:
                 "Win Rate":    st.column_config.NumberColumn("Win Rate", format="%.1f%%"),
             },
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
 
     # ── Rolling Sharpe del portafolio ────────────────────────
@@ -7162,7 +7642,7 @@ def tab_analytics() -> None:
                                  tickfont=dict(size=9, color="#636366", family="DM Mono"))
         _sharpe_fig.update_xaxes(showgrid=False,
                                  tickfont=dict(size=9, color="#636366", family="DM Mono"))
-        st.plotly_chart(_sharpe_fig, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(_sharpe_fig, width="stretch", config=PLOTLY_CONFIG)
     else:
         st.info("Sin precios live para calcular rolling Sharpe.")
 
@@ -7173,6 +7653,8 @@ def tab_analytics() -> None:
         from plotly.subplots import make_subplots as _make_subplots
         _col_bb, _ = st.columns([1, 3])
         with _col_bb:
+            if st.session_state.get("bb_ticker_sel") not in _bb_tickers:
+                st.session_state.pop("bb_ticker_sel", None)
             _sel = st.selectbox("Acción:", _bb_tickers, key="bb_ticker_sel")
         _ps = prices_df[_sel].dropna()
         if len(_ps) >= 20:
@@ -7243,7 +7725,7 @@ def tab_analytics() -> None:
             _fig_bb.update_yaxes(title_text="RSI", row=2, col=1,
                                   range=[0,100], showgrid=False)
             _fig_bb.update_xaxes(showgrid=False)
-            st.plotly_chart(_fig_bb, use_container_width=True, config=PLOTLY_CONFIG)
+            st.plotly_chart(_fig_bb, width="stretch", config=PLOTLY_CONFIG)
 
             # RSI actual
             _rsi_now = float(_rsi14.dropna().iloc[-1]) if not _rsi14.dropna().empty else None
@@ -7303,7 +7785,7 @@ def tab_analytics() -> None:
                               side="bottom", showgrid=False)
         fig_corr.update_yaxes(tickfont=dict(size=11, color="#aeaeb2", family="DM Mono"),
                               showgrid=False, autorange="reversed")
-        st.plotly_chart(fig_corr, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(fig_corr, width="stretch", config=PLOTLY_CONFIG)
 
         # Auto-insight: par más/menos correlacionado
         _pairs = [(corr_cols[i], corr_cols[j], float(corr.iloc[i,j]))
@@ -7340,7 +7822,7 @@ def tab_analytics() -> None:
             hovertemplate=f"<b>{t}</b>: %{{y:.1f}}<extra></extra>",
         ))
     fig_norm.update_layout(**PLOTLY_LAYOUT, yaxis_title="Base 100", height=400)
-    st.plotly_chart(fig_norm, use_container_width=True, config=PLOTLY_CONFIG)
+    st.plotly_chart(fig_norm, width="stretch", config=PLOTLY_CONFIG)
 
     # ── Contribución al riesgo ────────────────────────────────
     section("CONTRIBUCIÓN AL RIESGO DEL PORTAFOLIO")
@@ -7392,7 +7874,7 @@ def tab_analytics() -> None:
                 height=340,
                 title=f"Volatilidad del portafolio: {port_vol*100:.1f}% anual",
             )
-            st.plotly_chart(fig_rc, use_container_width=True, config=PLOTLY_CONFIG)
+            st.plotly_chart(fig_rc, width="stretch", config=PLOTLY_CONFIG)
 
     # ── DCA Calculator ────────────────────────────────────────
     section("DCA CALCULATOR — APORTACIÓN PERIÓDICA")
@@ -7464,7 +7946,7 @@ def tab_analytics() -> None:
             xaxis_title="Años", yaxis_title="Valor portafolio ($)",
             yaxis_tickprefix="$",
         )
-        st.plotly_chart(_fig_dca, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(_fig_dca, width="stretch", config=PLOTLY_CONFIG)
 
         _v50_f = _p50[-1]
         _v10_f = _p10[-1]
@@ -7574,6 +8056,8 @@ def tab_analytics() -> None:
     _st_curr_total = 0.0
     _st_stress_total = 0.0
 
+    # Betas desde el caché de eventos (antes: una consulta a Yahoo por acción en cada clic)
+    _st_events = fetch_events_data(tuple(sorted(tickers))) if _beta_adj else {}
     for _, _row in hdf.iterrows():
         _tk = _row["Ticker"]
         _sh = float(_row.get("Shares", 0))
@@ -7581,11 +8065,10 @@ def tab_analytics() -> None:
         if _px <= 0 or _sh <= 0:
             continue
         _curr_val = _sh * _px
-        # Beta ajustado (usa info de yfinance, fallback a 1.0)
         _beta = 1.0
         if _beta_adj:
             try:
-                _beta = float(yf.Ticker(_tk).info.get("beta") or 1.0)
+                _beta = float(_st_events.get(_tk, {}).get("beta") or 1.0)
                 _beta = max(0.1, min(_beta, 3.0))  # clamp
             except Exception:
                 _beta = 1.0
@@ -7723,7 +8206,8 @@ def fetch_stock_full(ticker: str) -> dict:
         out["debt_equity"]    = _f("debtToEquity")
         out["current_ratio"]  = _f("currentRatio")
         out["quick_ratio"]    = _f("quickRatio")
-        out["dividend_yield"] = _f("dividendYield")
+        _dy, _ = _dividend_info(info)
+        out["dividend_yield"] = round(_dy, 4) if _dy > 0 else None
         out["payout_ratio"]   = _f("payoutRatio")
         out["ebitda"]         = info.get("ebitda")
         out["revenue"]        = info.get("totalRevenue")
@@ -7779,95 +8263,15 @@ def fetch_stock_full(ticker: str) -> dict:
 
         # ── Noticias ──────────────────────────────────────────
         try:
-            news_raw = tk.news or []
-            out["news"] = []
-            for n in news_raw[:8]:
-                # yfinance >= 0.2.55 usa {"id":..., "content":{...}}
-                c = n.get("content") or n  # nuevo formato o legacy
-                title = c.get("title", "")
-                if not title:
-                    continue
-                provider   = (c.get("provider") or {}).get("displayName", "") or c.get("publisher", "")
-                url        = (c.get("canonicalUrl") or {}).get("url", "") or c.get("link", "")
-                pub_date   = c.get("pubDate", "")          # "2026-09-24T20:03:54Z"
-                legacy_ts  = n.get("providerPublishTime", 0)
-                if pub_date:
-                    try:
-                        ts = int(pd.Timestamp(pub_date).timestamp())
-                    except Exception:
-                        ts = legacy_ts
-                else:
-                    ts = legacy_ts
-                out["news"].append({
-                    "title":     title,
-                    "publisher": provider,
-                    "link":      url,
-                    "age":       _news_age(ts),
-                })
+            out["news"] = _parse_news(tk.news or [], 8)
         except Exception:
             out["news"] = []
 
-        # ── Historial 1 año ───────────────────────────────────
+        # ── Historial 1 año + indicadores técnicos ────────────
         hist = tk.history(period="1y", auto_adjust=True)
         out["hist"] = hist
         out["hist_ok"] = not hist.empty
-
-        # ── Indicadores técnicos ──────────────────────────────
-        if not hist.empty and len(hist) >= 20:
-            close = hist["Close"]
-            vol_s = hist["Volume"]
-
-            # SMA
-            out["sma20"]  = close.rolling(20).mean().iloc[-1]
-            out["sma50"]  = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else None
-            out["sma200"] = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else None
-
-            # RSI-14
-            delta = close.diff()
-            gain  = delta.clip(lower=0).rolling(14).mean()
-            loss  = (-delta.clip(upper=0)).rolling(14).mean()
-            rs    = gain / loss.replace(0, np.nan)
-            out["rsi"] = float((100 - 100/(1+rs)).iloc[-1])
-
-            # MACD (12,26,9)
-            ema12 = close.ewm(span=12).mean()
-            ema26 = close.ewm(span=26).mean()
-            macd_line   = ema12 - ema26
-            signal_line = macd_line.ewm(span=9).mean()
-            out["macd"]        = float(macd_line.iloc[-1])
-            out["macd_signal"] = float(signal_line.iloc[-1])
-            out["macd_hist"]   = float((macd_line - signal_line).iloc[-1])
-
-            # Bollinger Bands (20, 2σ)
-            sma20_s = close.rolling(20).mean()
-            std20   = close.rolling(20).std()
-            out["bb_upper"] = float((sma20_s + 2*std20).iloc[-1])
-            out["bb_lower"] = float((sma20_s - 2*std20).iloc[-1])
-            out["bb_pct"]   = float(
-                (close.iloc[-1] - (sma20_s - 2*std20).iloc[-1]) /
-                (4*std20.iloc[-1])
-            ) if std20.iloc[-1] > 0 else 0.5
-
-            # Volumen relativo
-            out["vol_ratio"] = float(vol_s.iloc[-1] / vol_s.rolling(20).mean().iloc[-1]) \
-                               if vol_s.rolling(20).mean().iloc[-1] > 0 else 1.0
-
-            # Retornos
-            p = close
-            out["ret_1w"]  = float(p.iloc[-1]/p.iloc[-5]-1)   if len(p)>=5   else None
-            out["ret_1m"]  = float(p.iloc[-1]/p.iloc[-21]-1)  if len(p)>=21  else None
-            out["ret_3m"]  = float(p.iloc[-1]/p.iloc[-63]-1)  if len(p)>=63  else None
-            out["ret_6m"]  = float(p.iloc[-1]/p.iloc[-126]-1) if len(p)>=126 else None
-            out["ret_1y"]  = float(p.iloc[-1]/p.iloc[0]-1)
-
-            # Max drawdown (1Y)
-            cum_max = p.cummax()
-            dd      = (p - cum_max) / cum_max
-            out["max_dd"] = float(dd.min())
-
-            # ATH distance
-            out["from_ath"] = float(p.iloc[-1]/out["wk52_high"] - 1) if out["wk52_high"] > 0 else 0
-            out["from_atl"] = float(p.iloc[-1]/out["wk52_low"]  - 1) if out["wk52_low"]  > 0 else 0
+        _add_technicals(out, hist)
 
         out["ok"] = True
     except Exception as e:
@@ -7876,6 +8280,124 @@ def fetch_stock_full(ticker: str) -> dict:
         # así el próximo intento del usuario vuelve a llamar a Yahoo Finance
         raise RuntimeError(str(e)) from e
 
+    return out
+
+
+def _parse_news(news_raw: list, limit: int) -> list[dict]:
+    """Noticias de yfinance en formato nuevo ({"content": {...}}) o el anterior."""
+    out = []
+    for n in news_raw:
+        c = n.get("content") or n
+        title = c.get("title", "")
+        if not title:
+            continue
+        provider = (c.get("provider") or {}).get("displayName", "") or c.get("publisher", "")
+        url      = (c.get("canonicalUrl") or {}).get("url", "") or c.get("link", "")
+        ts       = n.get("providerPublishTime", 0)
+        if c.get("pubDate"):
+            try:
+                ts = int(pd.Timestamp(c["pubDate"]).timestamp())
+            except Exception:
+                pass
+        out.append({"title": title, "publisher": provider, "link": url, "age": _news_age(ts)})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _add_technicals(out: dict, hist: pd.DataFrame) -> None:
+    """SMA, RSI, MACD, Bollinger, volumen relativo, retornos y drawdown (desde el histórico)."""
+    if hist.empty or len(hist) < 20:
+        return
+    close = hist["Close"]
+    vol_s = hist["Volume"]
+
+    out["sma20"]  = close.rolling(20).mean().iloc[-1]
+    out["sma50"]  = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else None
+    out["sma200"] = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else None
+
+    delta = close.diff()
+    gain  = delta.clip(lower=0).rolling(14).mean()
+    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+    rs    = gain / loss.replace(0, np.nan)
+    out["rsi"] = float((100 - 100/(1+rs)).iloc[-1])
+
+    ema12 = close.ewm(span=12).mean()
+    ema26 = close.ewm(span=26).mean()
+    macd_line   = ema12 - ema26
+    signal_line = macd_line.ewm(span=9).mean()
+    out["macd"]        = float(macd_line.iloc[-1])
+    out["macd_signal"] = float(signal_line.iloc[-1])
+    out["macd_hist"]   = float((macd_line - signal_line).iloc[-1])
+
+    sma20_s = close.rolling(20).mean()
+    std20   = close.rolling(20).std()
+    out["bb_upper"] = float((sma20_s + 2*std20).iloc[-1])
+    out["bb_lower"] = float((sma20_s - 2*std20).iloc[-1])
+    out["bb_pct"]   = float(
+        (close.iloc[-1] - (sma20_s - 2*std20).iloc[-1]) / (4*std20.iloc[-1])
+    ) if std20.iloc[-1] > 0 else 0.5
+
+    vmean = vol_s.rolling(20).mean().iloc[-1]
+    out["vol_ratio"] = float(vol_s.iloc[-1] / vmean) if vmean > 0 else 1.0
+
+    p = close
+    out["ret_1w"]  = float(p.iloc[-1]/p.iloc[-5]-1)   if len(p)>=5   else None
+    out["ret_1m"]  = float(p.iloc[-1]/p.iloc[-21]-1)  if len(p)>=21  else None
+    out["ret_3m"]  = float(p.iloc[-1]/p.iloc[-63]-1)  if len(p)>=63  else None
+    out["ret_6m"]  = float(p.iloc[-1]/p.iloc[-126]-1) if len(p)>=126 else None
+    out["ret_1y"]  = float(p.iloc[-1]/p.iloc[0]-1)
+
+    cum_max = p.cummax()
+    out["max_dd"] = float(((p - cum_max) / cum_max).min())
+
+    wh, wl = out.get("wk52_high") or 0, out.get("wk52_low") or 0
+    out["from_ath"] = float(p.iloc[-1]/wh - 1) if wh > 0 else 0
+    out["from_atl"] = float(p.iloc[-1]/wl - 1) if wl > 0 else 0
+
+
+_STOCK_TEXT_FIELDS = ("sector", "industry", "country", "description", "analyst_key")
+_STOCK_NUM_FIELDS = (
+    "mktcap", "employees", "beta", "pe", "forward_pe", "peg", "ev_ebitda", "pb", "ps",
+    "roe", "roa", "profit_margin", "op_margin", "gross_margin", "rev_growth", "earn_growth",
+    "earn_qgrowth", "debt_equity", "current_ratio", "quick_ratio", "dividend_yield",
+    "ebitda", "revenue", "fcf", "cash", "total_debt", "eps_trailing", "eps_forward",
+    "next_earn_date", "ex_div_date", "target_mean", "target_high", "target_low", "upside",
+)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def fetch_stock_basic(ticker: str) -> dict:
+    """
+    Respaldo cuando Yahoo no entrega `info` (límite de peticiones): precio, 52 semanas
+    y técnicos salen del histórico, que casi siempre sí responde. Sin fundamentales.
+    """
+    tk   = yf.Ticker(ticker)
+    hist = tk.history(period="1y", auto_adjust=True)
+    if hist.empty:
+        raise RuntimeError(f"Yahoo Finance no devolvió historial para {ticker}")
+    out = {"ticker": ticker, "name": ticker, "degraded": True,
+           **{k: "—" for k in _STOCK_TEXT_FIELDS},
+           **{k: None for k in _STOCK_NUM_FIELDS},
+           "n_analysts": 0, "buy": 0, "hold": 0, "sell": 0, "news": []}
+    close = hist["Close"]
+    out["price"]      = float(close.iloc[-1])
+    out["prev_close"] = float(close.iloc[-2]) if len(close) > 1 else out["price"]
+    out["change_1d"]  = out["price"] / out["prev_close"] - 1 if out["prev_close"] > 0 else 0.0
+    out["open"]       = float(hist["Open"].iloc[-1])
+    out["day_high"]   = float(hist["High"].iloc[-1])
+    out["day_low"]    = float(hist["Low"].iloc[-1])
+    out["wk52_high"]  = float(hist["High"].max())
+    out["wk52_low"]   = float(hist["Low"].min())
+    out["volume"]     = float(hist["Volume"].iloc[-1])
+    out["avg_volume"] = float(hist["Volume"].tail(60).mean() or 1)
+    try:
+        out["news"] = _parse_news(tk.news or [], 8)
+    except Exception:
+        pass
+    out["hist"], out["hist_ok"] = hist, True
+    _add_technicals(out, hist)
+    out["ok"] = True
     return out
 
 
@@ -8044,6 +8566,8 @@ def tab_stock_deep_dive() -> None:
     section("ANÁLISIS PROFUNDO POR ACCIÓN")
     col_sel, col_run, col_clr = st.columns([2, 1, 1])
     with col_sel:
+        if st.session_state.get("deepdive_ticker") not in tickers:
+            st.session_state.pop("deepdive_ticker", None)
         selected = st.selectbox(
             "Selecciona la acción a analizar:",
             tickers,
@@ -8052,10 +8576,10 @@ def tab_stock_deep_dive() -> None:
     with col_run:
         st.markdown("<br>", unsafe_allow_html=True)
         run_btn = st.button("🔬 Analizar", type="primary",
-                            use_container_width=True, key="deepdive_run")
+                            width="stretch", key="deepdive_run")
     with col_clr:
         st.markdown("<br>", unsafe_allow_html=True)
-        clear_btn = st.button("↻ Refrescar", use_container_width=True, key="deepdive_clear",
+        clear_btn = st.button("↻ Refrescar", width="stretch", key="deepdive_clear",
                               help="Limpia el caché y descarga datos frescos de Yahoo Finance")
 
     st.divider()
@@ -8078,23 +8602,24 @@ def tab_stock_deep_dive() -> None:
                 d = fetch_stock_full(selected)
                 st.session_state[cache_key] = d
             except Exception as e:
-                err_msg = str(e)
-                # No guardar el error en session_state para que el usuario pueda reintentar
-                if "rate" in err_msg.lower() or "too many" in err_msg.lower() or "429" in err_msg:
-                    st.error(
-                        f"Yahoo Finance está limitando las peticiones. "
-                        f"Espera unos minutos y presiona **Analizar** de nuevo."
-                    )
-                elif "precio 0" in err_msg.lower() or "precio" in err_msg.lower():
-                    st.warning(
-                        f"⚠️ Yahoo Finance devolvió datos incompletos para **{selected}**. "
-                        f"Espera unos segundos y presiona **↻ Refrescar** o **🔬 Analizar** de nuevo."
-                    )
-                else:
-                    st.error(f"No se pudieron obtener datos: {err_msg}")
-                return
+                # Yahoo no dio fundamentales: mostrar al menos precio y técnicos
+                # (sin guardarlo en session_state, para reintentar los completos)
+                try:
+                    d = fetch_stock_basic(selected)
+                except Exception as e2:
+                    st.error(f"No se pudieron obtener datos de {selected}: {e2}. "
+                             f"Espera unos minutos y presiona **🔬 Analizar** de nuevo.")
+                    return
     else:
         d = st.session_state[cache_key]
+
+    if d.get("degraded"):
+        st.warning(
+            f"⚠️ Yahoo Finance no entregó los fundamentales ni la opinión de analistas de "
+            f"**{selected}** en este momento (suele pasar cuando limita las peticiones). "
+            f"Se muestran precio y técnicos calculados del historial. "
+            f"Presiona **🔬 Analizar** en unos minutos para reintentar."
+        )
 
     if not d or not d.get("ok"):
         st.error(f"No se pudieron obtener datos: {d.get('error','desconocido') if d else 'sin datos'}")
@@ -8132,7 +8657,7 @@ def tab_stock_deep_dive() -> None:
           <div style="font-size:2.5rem; font-weight:800; color:#fff;
                       font-family:'DM Mono',monospace;">${d['price']:,.2f}</div>
           <div style="font-size:1rem; color:{chg_color}; font-family:'DM Mono',monospace;">
-            {'▲' if d['change_1d']>=0 else '▼'} {abs(d['change_1d']):.2%} hoy
+            {'▲' if d['change_1d']>=0 else '▼'} {abs(d['change_1d']):.2%} {price_day_label().lower()}
           </div>
         </div>
       </div>
@@ -8163,7 +8688,7 @@ def tab_stock_deep_dive() -> None:
         hist = d["hist"]
         close = hist["Close"]
         period_btn = st.radio("Período:", ["1M","3M","6M","1A"],
-                              horizontal=True, index=3, key="dd_period")
+                              horizontal=True, key="dd_period")
         period_map = {"1M":21,"3M":63,"6M":126,"1A":len(hist)}
         n_bars = min(period_map[period_btn], len(hist))
         h = hist.iloc[-n_bars:].copy()
@@ -8215,12 +8740,22 @@ def tab_stock_deep_dive() -> None:
                                       line=dict(color="#a78bfa", width=1.5),
                                       name="SMA 50"), row=1, col=1)
 
-        # Costo promedio
+        # Costo promedio: la línea solo si cae cerca del rango visible; si no,
+        # aplastaría las velas contra un extremo de la gráfica
         if avg_cost > 0:
-            fig.add_hline(y=avg_cost, line_dash="dash",
-                          line_color="rgba(255,214,10,0.8)",
-                          annotation_text=f"Tu costo ${avg_cost:.2f}",
-                          annotation_position="top left", row=1, col=1)
+            _lo, _hi = float(h["Low"].min()), float(h["High"].max())
+            if _lo * 0.85 <= avg_cost <= _hi * 1.15:
+                fig.add_hline(y=avg_cost, line_dash="dash",
+                              line_color="rgba(255,214,10,0.8)",
+                              annotation_text=f"Tu costo ${avg_cost:.2f}",
+                              annotation_position="top left", row=1, col=1)
+            else:
+                fig.add_annotation(
+                    x=0.01, y=0.98, xref="x domain", yref="y domain", showarrow=False,
+                    xanchor="left", yanchor="top",
+                    text=f"Tu costo ${avg_cost:.2f} ({'abajo' if avg_cost < _lo else 'arriba'} del rango)",
+                    font=dict(size=10, color="#ffd60a", family="DM Mono"),
+                    bgcolor="rgba(0,0,0,0.6)", row=1, col=1)
 
         # RSI
         delta_r = cl.diff()
@@ -8268,7 +8803,7 @@ def tab_stock_deep_dive() -> None:
             yaxis3=dict(title="MACD", gridcolor="rgba(255,255,255,0.04)", side="right"),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         )
-        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -8495,12 +9030,10 @@ def tab_stock_deep_dive() -> None:
             st.session_state[ai_key] = analysis_text
 
         analysis = st.session_state[ai_key]
-        st.markdown(
-            f'<div style="background:rgba(22,22,31,0.8); border:1px solid rgba(10,132,255,0.2);\n'
-            f'border-radius:16px; padding:24px 28px; line-height:1.8; color:#ffffff;">\n'
-            f'{analysis}\n</div>',
-            unsafe_allow_html=True
-        )
+        # Markdown nativo (envuelto en un <div> los títulos ## salían como texto) y
+        # "$" escapado: dos montos en la misma línea se interpretaban como fórmula LaTeX
+        with st.container(border=True):
+            st.markdown(analysis.replace("$", "\\$"))
 
         if st.button("🔄 Regenerar análisis", key=f"regen_{selected}", type="secondary"):
             if ai_key in st.session_state:
@@ -8617,31 +9150,20 @@ ALERT_TYPES = {
     "earnings_near": "Earnings en menos de X días",
 }
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_earnings_calendar(tickers: list[str]) -> dict:
-    """Obtiene fechas de earnings para múltiples tickers."""
+def fetch_earnings_calendar(tickers) -> dict:
+    """
+    Fechas de earnings (reutiliza el caché de fetch_events_data). Los días
+    restantes se calculan aquí, con la fecha de CDMX, para que no queden
+    congelados dentro del caché ni desfasados por la hora UTC del servidor.
+    """
     out = {}
-    for t in tickers:
-        try:
-            cal = yf.Ticker(t).calendar
-            earn_date = None
-            if isinstance(cal, dict):
-                ed = cal.get("Earnings Date")
-                if isinstance(ed, list) and ed:
-                    earn_date = pd.to_datetime(ed[0])
-                elif ed:
-                    earn_date = pd.to_datetime(ed)
-            elif isinstance(cal, pd.DataFrame) and not cal.empty:
-                for lbl in ["Earnings Date"]:
-                    if lbl in cal.index:
-                        earn_date = pd.to_datetime(cal.loc[lbl].iloc[0])
-                        break
-            if earn_date and pd.notna(earn_date):
-                days_away = (earn_date.date() - date.today()).days
-                out[t] = {"date": earn_date.strftime("%Y-%m-%d"),
-                          "days_away": days_away}
-        except Exception:
-            pass
+    today = _today_mx()
+    for t, ev in fetch_events_data(tuple(sorted(tickers))).items():
+        ne = ev.get("next_earnings")
+        if ne is None or pd.isna(ne):
+            continue
+        d = pd.Timestamp(ne).date()
+        out[t] = {"date": d.strftime("%Y-%m-%d"), "days_away": (d - today).days}
     return out
 
 
@@ -8655,17 +9177,37 @@ def check_alerts(holdings: pd.DataFrame, prices: dict,
     tickers       = holdings["Ticker"].tolist() if not holdings.empty else []
     triggered     = []
 
-    # Earnings próximos (siempre verificar)
+    # Earnings próximos: 7 días por defecto, o lo que configure una alerta del usuario
     if tickers:
+        earn_window = {t: 7 for t in tickers}
+        for a in alerts_config:
+            if a.get("active", True) and a.get("type") == "earnings_near" and a.get("ticker") in earn_window:
+                earn_window[a["ticker"]] = int(float(a.get("threshold", 7)))
         earnings = fetch_earnings_calendar(tuple(tickers))
         for t, e in earnings.items():
             da = e["days_away"]
-            if 0 <= da <= 7:
+            if 0 <= da <= earn_window.get(t, 7):
+                when = "hoy" if da == 0 else "mañana" if da == 1 else f"en {da} días"
                 triggered.append({
                     "ticker": t, "type": "earnings_near",
-                    "message": f"📅 **{t}** reporta earnings el **{e['date']}** ({da} días)",
+                    "message": f"📅 **{t}** reporta earnings {when} ({_fmt_dia(pd.Timestamp(e['date']).date())})",
                     "severity": "warning" if da <= 3 else "info",
                 })
+
+    # Tesis: precio objetivo alcanzado / stop loss roto (sin configurar nada extra)
+    for t, th in (st.session_state.get("thesis", {}) or {}).items():
+        price = float(prices.get(t, {}).get("price", 0) or 0)
+        if price <= 0 or t not in tickers:
+            continue
+        tgt, stop = float(th.get("target_price", 0) or 0), float(th.get("stop_loss", 0) or 0)
+        if tgt > 0 and price >= tgt:
+            triggered.append({"ticker": t, "type": "thesis_target", "severity": "success",
+                              "message": f"🎯 **{t}** alcanzó tu precio objetivo ${tgt:,.2f} "
+                                         f"(cotiza ${price:,.2f}) — revisa tu tesis"})
+        if stop > 0 and price <= stop:
+            triggered.append({"ticker": t, "type": "thesis_stop", "severity": "error",
+                              "message": f"🛑 **{t}** rompió tu stop loss ${stop:,.2f} "
+                                         f"(cotiza ${price:,.2f})"})
 
     for alert in alerts_config:
         if not alert.get("active", True):
@@ -8724,20 +9266,80 @@ def check_alerts(holdings: pd.DataFrame, prices: dict,
 
 
 def render_alerts_banner(triggered: list[dict]) -> None:
-    """Muestra las alertas disparadas como banners en la parte superior."""
+    """Alertas disparadas como chips compactos (antes: una franja grande por alerta)."""
     if not triggered:
         return
-    for alert in triggered:
-        sev = alert.get("severity", "info")
-        msg = alert["message"]
-        if sev == "error":
-            st.error(msg)
-        elif sev == "warning":
-            st.warning(msg)
-        elif sev == "success":
-            st.success(msg)
-        else:
-            st.info(msg)
+    import re, html as _html
+    sev_rgb = {"error": "255,69,58", "warning": "255,214,10",
+               "success": "48,209,88", "info": "10,132,255"}
+    chips = ""
+    for a in triggered:
+        rgb = sev_rgb.get(a.get("severity", "info"), sev_rgb["info"])
+        msg = re.sub(r"\*\*(.+?)\*\*", r"<b style='color:#fff;'>\1</b>", _html.escape(a["message"]))
+        msg = msg.replace("$", "&#36;")   # dos "$" en una línea se interpretarían como LaTeX
+        chips += (f"<span style='display:inline-block;background:rgba({rgb},0.09);"
+                  f"border:1px solid rgba({rgb},0.3);border-left:3px solid rgb({rgb});"
+                  f"border-radius:8px;padding:5px 11px;margin:0 6px 6px 0;font-size:0.78rem;"
+                  f"color:#d1d1d6;'>{msg}</span>")
+    st.markdown(f"<div style='margin-bottom:8px;'>{chips}</div>", unsafe_allow_html=True)
+    notify_alerts(triggered)
+
+
+# ── Notificaciones por Telegram ──────────────────────────────
+_TG_FILE   = os.path.join(PORTFOLIO_DIR, ".telegram")
+_SENT_FILE = os.path.join(PORTFOLIO_DIR, ".alerts_sent.json")
+
+
+def _telegram_config() -> tuple[str, str]:
+    try:
+        tok, chat = st.secrets.get("TELEGRAM_BOT_TOKEN", ""), st.secrets.get("TELEGRAM_CHAT_ID", "")
+        if tok and chat:
+            return str(tok), str(chat)
+    except Exception:
+        pass
+    raw = _read_credential(_TG_FILE)
+    if "|" in raw:
+        tok, chat = raw.split("|", 1)
+        return tok.strip(), chat.strip()
+    return "", ""
+
+
+def send_telegram(text: str) -> bool:
+    tok, chat = _telegram_config()
+    if not tok or not chat:
+        return False
+    try:
+        r = requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
+                          json={"chat_id": chat, "text": text, "parse_mode": "Markdown"},
+                          timeout=10)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def notify_alerts(triggered: list[dict]) -> None:
+    """Envía por Telegram cada alerta nueva una sola vez por día (si está configurado)."""
+    if not triggered or not all(_telegram_config()):
+        return
+    today = str(_today_mx())
+    try:
+        sent = json.load(open(_SENT_FILE, encoding="utf-8")) if os.path.exists(_SENT_FILE) else {}
+    except Exception:
+        sent = {}
+    sent = {k: v for k, v in sent.items() if v == today}      # olvidar días anteriores
+    changed = False
+    for a in triggered:
+        key = f"{a.get('ticker')}|{a.get('type')}"
+        if key in sent:
+            continue
+        if send_telegram("📊 Portfolio Manager\n" + a["message"]):
+            sent[key] = today
+            changed = True
+    if changed:
+        try:
+            json.dump(sent, open(_SENT_FILE, "w", encoding="utf-8"))
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────────────────────────
@@ -8794,7 +9396,7 @@ def tab_thesis() -> None:
         with st.expander(
             f"{'✅' if has_thesis else '📝'} **{t}** — "
             f"${price:,.2f}  "
-            f"({chg:+.2%} hoy)  ·  P&L: {pl_pct:+.1%}",
+            f"({chg:+.2%} {price_day_label().lower()})  ·  P&L: {pl_pct:+.1%}",
             expanded=not has_thesis,
         ):
             col_form, col_meta = st.columns([3, 1])
@@ -8833,9 +9435,9 @@ def tab_thesis() -> None:
                 with tc3:
                     raw_rev = th.get("review_date", "")
                     try:
-                        rev_default = pd.to_datetime(raw_rev).date() if raw_rev else date.today() + timedelta(days=90)
+                        rev_default = pd.to_datetime(raw_rev).date() if raw_rev else _today_mx() + timedelta(days=90)
                     except Exception:
-                        rev_default = date.today() + timedelta(days=90)
+                        rev_default = _today_mx() + timedelta(days=90)
                     new_review = st.date_input(
                         "📅 Fecha de revisión:",
                         value=rev_default, key=f"th_rev_{t}",
@@ -8848,7 +9450,7 @@ def tab_thesis() -> None:
                 )
 
                 if st.button(f"💾 Guardar tesis de {t}", key=f"th_save_{t}",
-                             type="primary", use_container_width=True):
+                             type="primary", width="stretch"):
                     thesis[t] = {
                         "thesis":       new_thesis,
                         "catalyst":     new_catalyst,
@@ -8856,8 +9458,8 @@ def tab_thesis() -> None:
                         "stop_loss":    new_stop,
                         "review_date":  str(new_review),
                         "notes":        new_notes,
-                        "added_date":   th.get("added_date", str(date.today())),
-                        "updated_date": str(date.today()),
+                        "added_date":   th.get("added_date", str(_today_mx())),
+                        "updated_date": str(_today_mx()),
                     }
                     st.session_state["thesis"] = thesis
                     st.success(f"Tesis de {t} guardada.")
@@ -8878,7 +9480,7 @@ def tab_thesis() -> None:
                 if th.get("review_date"):
                     try:
                         rev = pd.to_datetime(th["review_date"]).date()
-                        days_to_rev = (rev - date.today()).days
+                        days_to_rev = (rev - _today_mx()).days
                         if days_to_rev < 0:
                             st.warning(f"⏰ Revisión vencida hace {abs(days_to_rev)}d")
                         elif days_to_rev <= 7:
@@ -8891,7 +9493,7 @@ def tab_thesis() -> None:
                 # Borrar tesis
                 if has_thesis:
                     if st.button(f"🗑️ Borrar tesis", key=f"th_del_{t}",
-                                 type="secondary", use_container_width=True):
+                                 type="secondary", width="stretch"):
                         thesis.pop(t, None)
                         st.session_state["thesis"] = thesis
                         st.rerun()
@@ -8942,14 +9544,14 @@ def tab_alerts() -> None:
                 min_value=1.0, max_value=30.0, value=7.0, step=1.0, key="al_earn",
             )
 
-        if st.button("➕ Agregar alerta", type="primary", use_container_width=True, key="al_add"):
+        if st.button("➕ Agregar alerta", type="primary", width="stretch", key="al_add"):
             alerts.append({
                 "ticker":    al_ticker,
                 "type":      al_type,
                 "label":     ALERT_TYPES[al_type],
                 "threshold": al_threshold,
                 "active":    True,
-                "created":   str(date.today()),
+                "created":   str(_today_mx()),
             })
             st.session_state["alerts"] = alerts
             st.success("Alerta agregada.")
@@ -8974,12 +9576,12 @@ def tab_alerts() -> None:
                 c1, c2 = st.columns(2)
                 with c1:
                     tog_label = "Pausar" if active else "Activar"
-                    if st.button(tog_label, key=f"al_tog_{i}", use_container_width=True):
+                    if st.button(tog_label, key=f"al_tog_{i}", width="stretch"):
                         alerts[i]["active"] = not active
                         st.session_state["alerts"] = alerts
                         st.rerun()
                 with c2:
-                    if st.button("🗑️", key=f"al_del_{i}", use_container_width=True):
+                    if st.button("🗑️", key=f"al_del_{i}", width="stretch"):
                         alerts.pop(i)
                         st.session_state["alerts"] = alerts
                         st.rerun()
@@ -9013,7 +9615,7 @@ def tab_alerts() -> None:
                         "Fecha":   st.column_config.TextColumn("Fecha"),
                         "En días": st.column_config.NumberColumn("En días", format="%d"),
                     },
-                    hide_index=True, use_container_width=True,
+                    hide_index=True, width="stretch",
                 )
             else:
                 st.info("Sin earnings próximos en el horizonte.")
@@ -9021,15 +9623,16 @@ def tab_alerts() -> None:
             st.info("No se encontraron fechas de earnings disponibles.")
 
 
-def sidebar() -> None:
-    st.sidebar.markdown("""
-    <div style="padding: 16px 0 12px;">
-        <div class="hero-title">Portfolio<br>Manager</div>
-        <div class="hero-sub">Gestión · Rebalanceo · Analytics</div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.sidebar.divider()
+def _compute_rf_rate() -> None:
+    """Tasa libre de riesgo única para TODA la app (se calcula aunque el panel esté oculto)."""
+    tok = _load_banxico_token() or st.session_state.get("banxico_token", "")
+    cetes = fetch_cetes_rate(tok)[0] if tok else 0.09
+    tbill = fetch_tbill_rate()[0]
+    use_tbill = str(st.session_state.get("rf_source", "T-Bill")).startswith("T-Bill")
+    st.session_state["rf_rate"] = tbill if use_tbill else cetes
 
+
+def _sidebar_settings() -> None:
     # ── API Key de Anthropic ──────────────────────────────────
     st.sidebar.markdown("#### 🤖 Claude AI")
     _ak_from_secrets = bool(_load_anthropic_key())
@@ -9052,7 +9655,7 @@ def sidebar() -> None:
             help="Solo necesario si corres la app localmente.",
             key="_api_key_raw",
         )
-        if st.sidebar.button("💾 Guardar API Key", use_container_width=True, key="_save_key"):
+        if st.sidebar.button("💾 Guardar API Key", width="stretch", key="_save_key"):
             cleaned = api_key_input.strip().strip('"').strip("'")
             if cleaned.startswith("sk-ant"):
                 st.session_state["anthropic_api_key"] = cleaned
@@ -9119,7 +9722,7 @@ def sidebar() -> None:
         if _sync_n:
             st.sidebar.success(f"☁️ {_sync_n} portafolio(s) restaurado(s) desde GitHub")
         if st.sidebar.button("🗑 Cambiar token GitHub", key="_del_gh",
-                             use_container_width=True):
+                             width="stretch"):
             _write_credential(_GITHUB_TOKEN_FILE, "")
             _write_credential(_GITHUB_GIST_ID_FILE, "")
             st.session_state.pop("_gist_synced", None)
@@ -9159,7 +9762,7 @@ def sidebar() -> None:
                 help="Necesita scope: gist",
             )
             if st.button("💾 Guardar y conectar", key="_save_gh",
-                         use_container_width=True):
+                         width="stretch"):
                 _t = _gh_input.strip()
                 if _t.startswith("ghp_") or _t.startswith("github_pat_"):
                     _write_credential(_GITHUB_TOKEN_FILE, _t)
@@ -9199,7 +9802,7 @@ def sidebar() -> None:
         # Solo mostrar botón de cambio si NO viene de Secrets
         if not _bnx_from_secrets:
             if st.sidebar.button("🗑 Cambiar token Banxico", key="_del_bnx",
-                                 use_container_width=True):
+                                 width="stretch"):
                 st.session_state["banxico_token"] = ""
                 _write_credential(_BANXICO_TOKEN_FILE, "")
                 st.rerun()
@@ -9222,7 +9825,7 @@ def sidebar() -> None:
                 type="password",
                 key="_bnx_raw",
             )
-            if st.button("💾 Guardar", key="_save_bnx", use_container_width=True):
+            if st.button("💾 Guardar", key="_save_bnx", width="stretch"):
                 _tok = _bnx_input.strip()
                 if len(_tok) > 10:
                     st.session_state["banxico_token"] = _tok
@@ -9234,16 +9837,64 @@ def sidebar() -> None:
                     st.error("Token demasiado corto.")
             st.caption("👉 banxico.org.mx/SieAPIRest → Obtener token (gratis)")
 
-    fx = get_usd_mxn()
-    st.sidebar.caption(f"USD/MXN: ${fx:,.2f}")
-    st.sidebar.divider()
+    # ── Tasa libre de riesgo única para TODA la app ──────────
+    _cetes_val = float(st.session_state.get("rf_rate", 0.09))   # calculada arriba
+    _tb_val, _tb_date = fetch_tbill_rate()
+    _rf_src = st.sidebar.radio(
+        "Tasa libre de riesgo (Sharpe, Sortino):",
+        ["T-Bill EE.UU. (USD)", "CETES 28D (MXN)"],
+        key="rf_source",
+        help="Tu portafolio está en dólares: la referencia correcta es el T-Bill. "
+             "CETES sirve si quieres comparar contra lo que ganarías en pesos sin riesgo.",
+    )
+    st.session_state["rf_rate"] = _tb_val if _rf_src.startswith("T-Bill") else _cetes_val
+    st.sidebar.caption(
+        f"Usando **{st.session_state['rf_rate']*100:.2f}%** anual"
+        + (f" · T-Bill {_tb_date}" if _rf_src.startswith("T-Bill") and _tb_date != "fallback" else "")
+    )
 
-    # Info del portafolio cargado
+
+
+    # ── Telegram ─────────────────────────────────────────────
+    st.sidebar.divider()
+    st.sidebar.markdown("#### 📲 Telegram · Alertas")
+    _tg_tok, _tg_chat = _telegram_config()
+    if _tg_tok and _tg_chat:
+        st.sidebar.caption("✓ Conectado. Las alertas nuevas se envían una vez al día "
+                           "cuando abres la app.")
+        _tg1, _tg2 = st.sidebar.columns(2)
+        with _tg1:
+            if st.button("Probar", key="_tg_test", width="stretch"):
+                ok = send_telegram("✅ Portfolio Manager conectado.")
+                st.toast("Mensaje enviado" if ok else "No se pudo enviar — revisa token y chat ID")
+        with _tg2:
+            if st.button("Desconectar", key="_tg_del", width="stretch"):
+                _write_credential(_TG_FILE, "")
+                st.rerun()
+    else:
+        _tg_t = st.sidebar.text_input("Bot token:", type="password", key="_tg_tok_in",
+                                      placeholder="123456:ABC…")
+        _tg_c = st.sidebar.text_input("Chat ID:", key="_tg_chat_in", placeholder="123456789")
+        if st.sidebar.button("💾 Guardar Telegram", key="_tg_save", width="stretch"):
+            if ":" in _tg_t and _tg_c.strip().lstrip("-").isdigit():
+                _write_credential(_TG_FILE, f"{_tg_t.strip()}|{_tg_c.strip()}")
+                st.rerun()
+            else:
+                st.sidebar.error("Token o chat ID inválidos.")
+        st.sidebar.caption("Crea un bot con @BotFather y obtén tu chat ID con @userinfobot. "
+                           "En la nube usa Secrets: TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID.")
+
+
+def sidebar() -> None:
+    _compute_rf_rate()
+    fx    = get_usd_mxn()
     pname = st.session_state.get("portfolio_name", "")
     n_pos = len(holdings_df())
     bench = st.session_state.get("benchmark", "SPY")
 
     if pname:
+        _saved_at = st.session_state.get("_last_saved_at")
+        _save_txt = (f"☁️ guardado {_saved_at}" if _saved_at else "☁️ guardado automático")
         st.sidebar.markdown(f"""
 <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);
             border-radius:12px;padding:12px 14px;margin-top:4px;">
@@ -9254,10 +9905,10 @@ def sidebar() -> None:
               color:#ffffff;margin-bottom:6px;">📁 {pname}</div>
   <div style="display:flex;justify-content:space-between;margin-top:2px;">
     <span style="font-size:0.75rem;color:#8e8e93;font-family:DM Mono,monospace;">
-      {n_pos} posiciones</span>
-    <span style="font-size:0.75rem;color:#8e8e93;font-family:DM Mono,monospace;">
-      vs {bench}</span>
+      {n_pos} posiciones · vs {bench}</span>
   </div>
+  <div style="font-size:0.66rem;color:#30d158;font-family:DM Mono,monospace;margin-top:6px;">
+    {_save_txt}</div>
 </div>
         """, unsafe_allow_html=True)
     else:
@@ -9265,16 +9916,27 @@ def sidebar() -> None:
 <div style="background:rgba(255,214,10,0.06);border:1px solid rgba(255,214,10,0.2);
             border-radius:10px;padding:10px 12px;font-size:0.8rem;color:#ffd60a;
             font-family:DM Mono,monospace;">
-  Sin portafolio cargado.<br>
+  Sin portafolio guardado.<br>
   <span style="color:#8e8e93;font-size:0.72rem;">
-    Ve a <b style="color:#aeaeb2;">💼 Portfolio</b> para empezar.</span>
+    Ve a <b style="color:#aeaeb2;">💼 Portfolio</b>, ponle nombre y guarda.</span>
 </div>
         """, unsafe_allow_html=True)
+    if st.session_state.get("_autosave_error"):
+        st.sidebar.error(f"No se pudo guardar: {st.session_state.pop('_autosave_error')}")
 
-    st.sidebar.divider()
+    rf = st.session_state.get("rf_rate", 0.04)
+    rf_src = "T-Bill" if str(st.session_state.get("rf_source", "T-Bill")).startswith("T-Bill") else "CETES"
+    st.sidebar.caption(f"USD/MXN **${fx:,.2f}** · Libre de riesgo **{rf*100:.2f}%** ({rf_src})")
+
+    if st.sidebar.toggle("⚙️ Configuración (IA, GitHub, tasas)", key="show_settings",
+                         help="Claves de API, respaldo en GitHub y tasa libre de riesgo"):
+        st.sidebar.divider()
+        _sidebar_settings()
+        _compute_rf_rate()
+
     st.sidebar.markdown(
         "<div style='font-size:0.65rem;color:#48484a;font-family:DM Mono,monospace;"
-        "text-align:center;'>v2.0 · Portfolio Manager</div>",
+        "text-align:center;margin-top:18px;'>Portfolio Manager · v3.0</div>",
         unsafe_allow_html=True,
     )
 
@@ -9285,6 +9947,111 @@ def sidebar() -> None:
 # ─────────────────────────────────────────────────────────────
 # MARKET OVERVIEW TAB
 # ─────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_futures_quotes() -> dict:
+    """Futuros del S&P 500 y Nasdaq: indican cómo abriría el mercado."""
+    out = {}
+    for sym, name in (("ES=F", "S&P fut"), ("NQ=F", "Nasdaq fut")):
+        try:
+            fi = yf.Ticker(sym).fast_info
+            lp, pc = float(fi.last_price or 0), float(fi.previous_close or 0)
+            if lp > 0 and pc > 0:
+                out[name] = lp / pc - 1
+        except Exception:
+            pass
+    return out
+
+
+def _fmt_duration(td: pd.Timedelta) -> str:
+    mins = max(0, int(td.total_seconds() // 60))
+    d, rem = divmod(mins, 1440)
+    h, m = divmod(rem, 60)
+    if d:
+        return f"{d} d {h} h"
+    if h:
+        return f"{h} h {m:02d} min"
+    return f"{m} min"
+
+
+def _fmt_hour_both(ts_et: pd.Timestamp) -> str:
+    """'8:30 CDMX (9:30 NY)'."""
+    mx = ts_et.tz_convert(_MX_TZ)
+    return f"{mx.hour}:{mx.minute:02d} CDMX ({ts_et.hour}:{ts_et.minute:02d} NY)"
+
+
+@st.fragment(run_every=60)
+def render_market_bar() -> None:
+    m = _get_market_status()
+    now = m["now_et"]
+    st_map = {
+        "open":    ("ABIERTO",      "#30d158", "48,209,88"),
+        "pre":     ("PRE-MARKET",   "#ffd60a", "255,214,10"),
+        "post":    ("AFTER-HOURS",  "#ff9f0a", "255,159,10"),
+        "closed":  ("CERRADO",      "#8e8e93", "142,142,147"),
+        "weekend": ("FIN DE SEMANA", "#8e8e93", "142,142,147"),
+        "holiday": ("FERIADO",      "#ff453a", "255,69,58"),
+    }
+    label, clr, rgb = st_map[m["status"]]
+    nxt = m["next_open_dt"]
+
+    if m["status"] == "open":
+        main = (f"Cierra en <b>{_fmt_duration(m['close_dt'] - now)}</b> · "
+                f"{_fmt_hour_both(m['close_dt'])}")
+        if m["early_close"]:
+            main += f" · <span style='color:#ff9f0a;'>cierre temprano ({m['early_close']})</span>"
+    elif m["status"] == "pre":
+        main = f"Abre en <b>{_fmt_duration(nxt - now)}</b> · {_fmt_hour_both(nxt)}"
+    else:
+        why = ""
+        if m["status"] == "holiday":
+            why = f"<b style='color:#ff453a;'>{m['holiday_name']}</b> · "
+        elif m["status"] == "post":
+            why = "Operaciones fuera de horario hasta 20:00 NY · "
+        main = (f"{why}Abre <b>{_fmt_dia(nxt.date())}</b> en <b>{_fmt_duration(nxt - now)}</b>"
+                f" · {_fmt_hour_both(nxt)}")
+
+    prices_txt = ("Precios en vivo" if m["status"] == "open"
+                  else f"Precios al cierre del {_fmt_dia(m['last_session'])}")
+
+    up_h = sorted((d, n) for d, n in _NYSE_HOLIDAYS.items() if d > m["date"])[:1]
+    nxt_hol = (f"Próximo feriado: <b>{up_h[0][1]}</b> · {_fmt_dia(up_h[0][0])}" if up_h else "")
+    up_fomc = [d for d in _FOMC_DATES if d >= m["date"]][:1]
+    fomc_txt = f"Fed (FOMC): <b>{_fmt_dia(up_fomc[0])}</b>" if up_fomc else ""
+
+    fut_txt = ""
+    if m["status"] != "open":
+        fut = fetch_futures_quotes()
+        fut_txt = " ".join(
+            f"{k} <b style='color:{'#30d158' if v >= 0 else '#ff453a'};'>"
+            f"{'▲' if v >= 0 else '▼'}{abs(v):.2%}</b>" for k, v in fut.items())
+
+    now_mx = now.tz_convert(_MX_TZ)
+    seg = "<span style='color:#3a3a3c;margin:0 10px;'>|</span>"
+    # Cada segmento en su <span>: dentro de un flex, el texto suelto pierde los espacios
+    parts = [f"<span>{p}</span>" for p in (main, prices_txt, fut_txt, nxt_hol, fomc_txt) if p]
+    st.markdown(
+        f"<div style='display:flex;align-items:center;flex-wrap:wrap;gap:6px 0;"
+        f"background:rgba({rgb},0.06);border:1px solid rgba({rgb},0.25);border-radius:12px;"
+        f"padding:9px 14px;margin:-6px 0 14px;font-family:DM Mono,monospace;font-size:0.74rem;"
+        f"color:#aeaeb2;'>"
+        f"<span style='display:inline-flex;align-items:center;gap:7px;color:{clr};font-weight:800;"
+        f"letter-spacing:1px;margin-right:12px;'>"
+        f"<span style='width:8px;height:8px;border-radius:50%;background:{clr};"
+        f"box-shadow:0 0 8px {clr};display:inline-block;'></span>{label}</span>"
+        + seg.join(parts)
+        + f"<span style='margin-left:auto;color:#636366;'>{now_mx.hour}:{now_mx.minute:02d} CDMX</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _market_calendar_rows(today: date, n: int = 10) -> list[tuple[date, str, str]]:
+    ev = [(d, "Feriado (cerrado)", nm) for d, nm in _NYSE_HOLIDAYS.items() if d >= today]
+    ev += [(d, "Cierre 13:00 NY", nm) for d, nm in _NYSE_EARLY_CLOSES.items() if d >= today]
+    ev += [(d, "Fed (FOMC)", "Decisión de tasas 14:00 NY") for d in _FOMC_DATES if d >= today]
+    return sorted(ev)[:n]
+
 
 def tab_market_overview() -> None:
     """Vista rápida: índices + sector ETFs — estilo Market Pulse cards."""
@@ -9316,14 +10083,22 @@ def tab_market_overview() -> None:
             f'</svg>'
         )
 
+    # Nombre y formato de precio para símbolos que no son acciones
+    _MKT_NAMES = {"^VIX": "VIX · miedo", "^TNX": "Bono EE.UU. 10A", "DX-Y.NYB": "Dólar (DXY)",
+                  "USDMXN=X": "USD/MXN", "BTC-USD": "Bitcoin"}
+    _MKT_FMT = {"^VIX": "{:,.2f}", "^TNX": "{:,.2f}%", "DX-Y.NYB": "{:,.2f}",
+                "USDMXN=X": "${:,.4f}", "BTC-USD": "${:,.0f}"}
+
     def _mkt_card(t: str, pd_: dict, spark_override: list | None = None,
                   range_chg: float | None = None, range_label: str = "") -> str:
         price = pd_.get("price", 0.0)
+        price_txt = _MKT_FMT.get(t, "${:,.2f}").format(price)
+        t_label = _MKT_NAMES.get(t, t)
         pv    = pd_.get("prev_close", 0.0)
         chg_p = (price - pv) / pv if pv > 0 else 0.0
         chg_o = pd_.get("change_vs_open", 0.0) or 0.0
         has_o = pd_.get("day_open", 0) > 0
-        chg   = chg_o if has_o else chg_p
+        chg   = chg_p   # color = mismo cambio que el número grande
         rsi   = pd_.get("rsi14")
         sma   = pd_.get("above_sma20")
         vr    = pd_.get("vol_ratio")
@@ -9397,9 +10172,9 @@ def tab_market_overview() -> None:
             f'<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
             f'<div>'
             f'<div style="font-family:DM Mono,monospace;font-weight:900;font-size:0.95rem;'
-            f'color:#fff;line-height:1;">{t}</div>'
+            f'color:#fff;line-height:1;">{t_label}</div>'
             f'<div style="font-family:DM Mono,monospace;font-size:1.5rem;font-weight:700;'
-            f'color:#fff;line-height:1.1;margin-top:3px;letter-spacing:-1px;">${price:,.2f}</div>'
+            f'color:#fff;line-height:1.1;margin-top:3px;letter-spacing:-1px;">{price_txt}</div>'
             f'</div>'
             f'<div style="text-align:right;">{range_badge}</div></div>'
             f'{spark_svg}'
@@ -9410,15 +10185,16 @@ def tab_market_overview() -> None:
 
     MARKET_GROUPS = {
         "Índices":     ["SPY", "QQQ", "IWM", "DIA"],
+        "Macro":       ["^VIX", "^TNX", "DX-Y.NYB", "USDMXN=X", "BTC-USD"],
         "Renta Fija":  ["TLT", "AGG", "HYG"],
         "Commodities": ["GLD", "SLV", "USO"],
-        "Volatilidad": ["VXX"],
     }
-    SECTOR_TICKERS = ["XLK","XLF","XLV","XLY","XLI","XLE","XLU","XLRE","XLB"]
+    SECTOR_TICKERS = ["XLK","XLF","XLV","XLY","XLP","XLC","XLI","XLE","XLU","XLRE","XLB"]
     SECTOR_LABELS  = {
-        "XLK":"Tech","XLF":"Finanzas","XLV":"Salud","XLY":"Consumo",
+        "XLK":"Tech","XLF":"Finanzas","XLV":"Salud","XLY":"Consumo discrecional",
+        "XLP":"Consumo básico","XLC":"Comunicación",
         "XLI":"Industrial","XLE":"Energía","XLU":"Utilities",
-        "XLRE":"Real Estate","XLB":"Materials",
+        "XLRE":"Real Estate","XLB":"Materiales",
     }
     _all_mkt = tuple(sorted(
         {t for g in MARKET_GROUPS.values() for t in g} | set(SECTOR_TICKERS)
@@ -9442,7 +10218,7 @@ def tab_market_overview() -> None:
                 "font-size:0.75rem;cursor:pointer;width:100%;"
             )
             if st.button(_ropt, key=f"_mkt_range_{_ropt}",
-                         use_container_width=True,
+                         width="stretch",
                          type="primary" if _is_active else "secondary"):
                 st.session_state["mkt_range"] = _ropt
                 st.rerun()
@@ -9468,7 +10244,7 @@ def tab_market_overview() -> None:
                         _spark_cache[_t] = _ser.tolist()
                         _range_ret[_t]   = float((_ser.iloc[-1] - _ser.iloc[0]) / _ser.iloc[0])
 
-    section("MERCADO HOY" if _range_sel == "1D" else f"MERCADO · {_range_sel}")
+    section(f"MERCADO · {price_day_label().upper()}" if _range_sel == "1D" else f"MERCADO · {_range_sel}")
     for gname, gtickers in MARKET_GROUPS.items():
         st.markdown(
             f"<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
@@ -9476,18 +10252,18 @@ def tab_market_overview() -> None:
             f"margin:14px 0 8px;'>{gname}</div>",
             unsafe_allow_html=True,
         )
-        _gcols = st.columns(len(gtickers), gap="small")
-        for _gc, _gt in zip(_gcols, gtickers):
-            with _gc:
-                _spark_ov  = _spark_cache.get(_gt) if _range_sel != "1D" else None
-                _range_chg = _range_ret.get(_gt)   if _range_sel != "1D" else None
-                st.markdown(
-                    _mkt_card(_gt, mkt_pulse.get(_gt, {}),
-                              spark_override=_spark_ov,
-                              range_chg=_range_chg,
-                              range_label=_rlabel),
-                    unsafe_allow_html=True,
-                )
+        # Cuadrícula que se acomoda al ancho (columnas fijas encimaban precio y %)
+        _cards = "".join(
+            _mkt_card(_gt, mkt_pulse.get(_gt, {}),
+                      spark_override=_spark_cache.get(_gt) if _range_sel != "1D" else None,
+                      range_chg=_range_ret.get(_gt) if _range_sel != "1D" else None,
+                      range_label=_rlabel)
+            for _gt in gtickers)
+        st.markdown(
+            f"<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));"
+            f"gap:12px;'>{_cards}</div>",
+            unsafe_allow_html=True,
+        )
 
     # ── Gráfica comparativa de rendimiento por período ─────────
     if _range_sel != "1D" and not _range_df.empty:
@@ -9509,7 +10285,7 @@ def tab_market_overview() -> None:
         _gc1, _gc2, _gc3, _gc4, _gc5, _ = st.columns([1.2, 1.2, 1.2, 1.2, 1.2, 3])
         for _gcol2, _gopt in zip([_gc1, _gc2, _gc3, _gc4, _gc5], _grp_opts):
             with _gcol2:
-                if st.button(_gopt, key=f"_mkt_grp_{_gopt}", use_container_width=True,
+                if st.button(_gopt, key=f"_mkt_grp_{_gopt}", width="stretch",
                              type="primary" if _grp_sel == _gopt else "secondary"):
                     st.session_state["mkt_chart_group"] = _gopt
                     st.rerun()
@@ -9555,7 +10331,7 @@ def tab_market_overview() -> None:
                 orientation="h", y=-0.18,
             ),
         )
-        st.plotly_chart(_fig_rng, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(_fig_rng, width="stretch", config={"displayModeBar": False})
 
     st.markdown("<br>", unsafe_allow_html=True)
     section("SECTORES S&P 500")
@@ -9586,6 +10362,36 @@ def tab_market_overview() -> None:
                 unsafe_allow_html=True,
             )
 
+    # ── Calendario: feriados, cierres tempranos, Fed y earnings propios ──
+    st.markdown("<br>", unsafe_allow_html=True)
+    section("CALENDARIO DEL MERCADO")
+    _today_c = _today_mx()
+    _cal = _market_calendar_rows(_today_c, n=12)
+    _held_c = holdings_df()["Ticker"].tolist()
+    if _held_c:
+        for _t, _e in fetch_earnings_calendar(tuple(_held_c)).items():
+            if 0 <= _e["days_away"] <= 60:
+                _cal.append((pd.Timestamp(_e["date"]).date(), "Earnings", _t))
+    _cal = sorted(_cal)[:14]
+    _cal_clr = {"Feriado (cerrado)": "#ff453a", "Cierre 13:00 NY": "#ff9f0a",
+                "Fed (FOMC)": "#bf5af2", "Earnings": "#0a84ff"}
+    _cal_rows = "".join(
+        f"<tr style='border-bottom:1px solid rgba(255,255,255,0.04);'>"
+        f"<td style='padding:7px 14px 7px 0;color:#fff;white-space:nowrap;'>{_fmt_dia(d)} {d.year}</td>"
+        f"<td style='padding:7px 14px;white-space:nowrap;'><span style='color:{_cal_clr.get(k, '#aeaeb2')};"
+        f"font-weight:700;'>{k}</span></td>"
+        f"<td style='padding:7px 0;color:#aeaeb2;'>{n} · en {(d - _today_c).days} d</td></tr>"
+        for d, k, n in _cal
+    )
+    st.markdown(
+        f"<div style='overflow-x:auto;'><table style='border-collapse:collapse;font-family:DM Mono,"
+        f"monospace;font-size:0.78rem;width:100%;'>{_cal_rows}</table></div>"
+        f"<div style='font-size:0.66rem;color:#636366;margin-top:6px;'>Horarios NYSE: 9:30–16:00 NY "
+        f"(7:30–14:00 CDMX en horario de verano de EE.UU., 8:30–15:00 en invierno). "
+        f"Fechas de la Fed según su calendario publicado.</div>",
+        unsafe_allow_html=True,
+    )
+
     # ── Watchlist ──────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     section("WATCHLIST")
@@ -9596,7 +10402,7 @@ def tab_market_overview() -> None:
         _wl_new = st.text_input("Agregar ticker:", placeholder="AAPL, MSFT, GOOGL…",
                                  key="_wl_add_input", label_visibility="collapsed")
     with _wl_c2:
-        if st.button("➕ Agregar", key="_wl_add_btn", use_container_width=True):
+        if st.button("➕ Agregar", key="_wl_add_btn", width="stretch"):
             _wl_items = [t.strip().upper() for t in _wl_new.replace(",", " ").split() if t.strip()]
             _wl_curr  = st.session_state.get("watchlist", [])
             _added = 0
@@ -9643,7 +10449,7 @@ def tab_market_overview() -> None:
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-                if st.button("✕", key=f"_wl_rm_{_wt}", use_container_width=True):
+                if st.button("✕", key=f"_wl_rm_{_wt}", width="stretch"):
                     _to_remove.append(_wt)
 
         if _to_remove:
@@ -9671,48 +10477,85 @@ def tab_market_overview() -> None:
 
 def main() -> None:
     init_state()
+    autoload_last_portfolio()
+    # Un cambio seguido de st.rerun() no llega al final de main: se guarda aquí
+    autosave_portfolio()
+    _flash = st.session_state.pop("_flash", None)
+    if _flash:
+        st.toast(_flash)
+    try:
+        _main_body()
+    finally:
+        autosave_portfolio()
+
+
+def _main_body() -> None:
     sidebar()
+    _keep_widget_state()
 
-    # ── Onboarding cuando no hay posiciones ──────────────────
-    hdf_check     = holdings_df()
-    has_portfolio = not hdf_check.empty
-
-    if not has_portfolio:
-        show_onboarding()
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown(
-            "<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
-            "color:#636366;text-transform:uppercase;font-family:DM Mono,monospace;"
-            "margin-bottom:12px;'>EMPEZAR — AÑADE TU PRIMERA POSICIÓN</div>",
-            unsafe_allow_html=True)
-        tab_editor()
+    if holdings_df().empty:
+        nav = st.navigation([st.Page(_page_onboarding, title="Inicio", icon="👋",
+                                     url_path="inicio", default=True)],
+                           position="hidden")
+        nav.run()
         return
 
-    # ── Navegación reorganizada ────────────────────────────
-    tabs = st.tabs([
-        "📡 Dashboard",      # Monitor
-        "🌍 Mercado",        # Monitor
-        "🧬 Por Acción",     # Análisis
-        "📈 Performance",    # Análisis
-        "🔍 Técnico",        # Análisis
-        "💼 Portfolio",      # Gestión
-        "⚖️ Rebalanceo",    # Gestión
-        "📝 Tesis",          # Gestión
-        "🔔 Alertas",        # Gestión
-    ])
+    sections: dict[str, list] = {}
+    for i, (section_name, title, icon, fn, path) in enumerate(APP_PAGES):
+        sections.setdefault(section_name, []).append(
+            st.Page(fn, title=title, icon=icon, url_path=path, default=(i == 0)))
+    nav = st.navigation(sections, position="sidebar")
+    render_market_bar()
+    nav.run()
 
-    with tabs[0]: tab_dashboard()
-    with tabs[1]: tab_market_overview()
-    with tabs[2]: tab_stock_deep_dive()
-    with tabs[3]: tab_performance()
-    with tabs[4]: tab_analytics()
-    with tabs[5]: tab_editor()
-    with tabs[6]: tab_rebalance()
-    with tabs[7]: tab_thesis()
-    with tabs[8]: tab_alerts()
+
+def _page_onboarding() -> None:
+    show_onboarding()
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='font-size:0.62rem;font-weight:700;letter-spacing:2px;"
+        "color:#636366;text-transform:uppercase;font-family:DM Mono,monospace;"
+        "margin-bottom:12px;'>EMPEZAR — AÑADE TU PRIMERA POSICIÓN</div>",
+        unsafe_allow_html=True)
+    tab_editor()
+
+
+# Solo se ejecuta la página abierta (antes st.tabs corría las 9 en cada clic).
+APP_PAGES = [
+    ("Monitor",  "Dashboard",   "📡", tab_dashboard,       "dashboard"),
+    ("Monitor",  "Mercado",     "🌍", tab_market_overview, "mercado"),
+    ("Análisis", "Por Acción",  "🧬", tab_stock_deep_dive, "accion"),
+    ("Análisis", "Performance", "📈", tab_performance,     "performance"),
+    ("Análisis", "Técnico",     "🔍", tab_analytics,       "tecnico"),
+    ("Gestión",  "Portfolio",   "💼", tab_editor,          "portfolio"),
+    ("Gestión",  "Rebalanceo",  "⚖️", tab_rebalance,       "rebalanceo"),
+    ("Gestión",  "Tesis",       "📝", tab_thesis,          "tesis"),
+    ("Gestión",  "Alertas",     "🔔", tab_alerts,          "alertas"),
+]
+
+# Ajustes que se conservan al cambiar de página (Streamlit borra el estado de
+# los controles que no se dibujan). Valor = default inicial (None = sin default).
+_KEEP_WIDGETS = {
+    "rf_source": "T-Bill EE.UU. (USD)",
+    "pulse_table_mode": False,
+    "deepdive_ticker": None, "dd_period": "1A",
+    "extra_bench_input": "",
+    "analytics_years": 2, "bb_ticker_sel": None,
+    "reb1_mode": "Activo (compra + venta)", "reb1_cap": 0.0, "reb1_comm": 0.0,
+    "reb1_min": 10.0, "reb1_drift": 0,
+    "opt_strategy": "SmartCluster", "opt_maxw": 25,
+    "reb2_mode": "Activo (compra + venta)", "reb2_cap": 0.0, "reb2_comm": 0.0,
+    "reb2_min": 10.0, "opt_extra": "", "opt_locked": [],
+}
+
+
+def _keep_widget_state() -> None:
+    for k, default in _KEEP_WIDGETS.items():
+        if k in st.session_state:
+            st.session_state[k] = st.session_state[k]
+        elif default is not None:
+            st.session_state[k] = default
 
 
 if __name__ == "__main__":
     main()
-
-    ########    python -m streamlit run portfolio_manager.py

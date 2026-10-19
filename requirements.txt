@@ -1,8 +1,12 @@
-streamlit>=1.28.0
-yfinance>=0.2.28
-pandas>=2.0.0
-numpy>=1.24.0
-plotly>=5.15.0
-requests>=2.31.0
-scipy>=1.11.0
-scikit-learn>=1.3.0
+# Streamlit y yfinance van FIJOS: son los que cambian de comportamiento entre
+# versiones y rompían la app "sola". Para actualizarlos, cambia el número,
+# prueba en local y luego sube el cambio.
+streamlit==1.51.0
+yfinance==0.2.61
+# El resto con rangos compatibles (funcionan con Python 3.11 – 3.13)
+pandas>=2.2,<3
+numpy>=1.26,<3
+plotly>=6.0,<7
+requests>=2.32,<3
+scipy>=1.14,<2
+lxml>=5.3
