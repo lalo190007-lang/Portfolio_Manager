@@ -1,12 +1,10 @@
-# Streamlit y yfinance van FIJOS: son los que cambian de comportamiento entre
-# versiones y rompían la app "sola". Para actualizarlos, cambia el número,
-# prueba en local y luego sube el cambio.
-streamlit==1.51.0
-yfinance==0.2.61
-# El resto con rangos compatibles (funcionan con Python 3.11 – 3.13)
-pandas>=2.2,<3
-numpy>=1.26,<3
-plotly>=6.0,<7
-requests>=2.32,<3
-scipy>=1.14,<2
+# Versiones mínimas (no exactas): forzar una versión vieja obligaba a Streamlit
+# Cloud a reinstalar y la app no arrancaba con el Python del servidor.
+streamlit>=1.51
+yfinance>=0.2.61
+pandas>=2.2
+numpy>=1.26
+plotly>=6.0
+requests>=2.32
+scipy>=1.14
 lxml>=5.3
